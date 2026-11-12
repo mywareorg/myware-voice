@@ -1,0 +1,20 @@
+[package]
+name = "hippo-voice-settings"
+version = "0.1.0"
+edition = "2021"
+description = "Settings window for hippo-voice."
+license = "LGPL-2.1-only"
+repository = "https://gitlab.com/librewarelive/hippo-voice"
+
+[[bin]]
+name = "hippo-voice-settings"
+path = "src/main.rs"
+
+[dependencies]
+# The config file is the contract between this window and the daemon; it is the
+# only reason this binary depends on the daemon crate, and it never talks to the
+# running daemon over its socket.
+hippo-voice = { path = ".." }
+hippo-ui = { path = "../../hippo-ui/crates/hippo-ui", features = ["serde"] }
+iced = { version = "0.13", features = ["tokio", "advanced"] }
+toml = "0.8"

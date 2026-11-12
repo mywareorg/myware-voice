@@ -99,6 +99,20 @@ wl-copy --trim-newline <<< "hello"; ydotool key 29:1 47:1 47:0 29:0
 Terminals get `ctrl+shift+v` rather than `ctrl+v`, and a trailing newline is
 never copied, because a newline pasted into a terminal executes a command.
 
+## Settings window
+
+`hippo-voice-settings` is a separate binary, built against `hippo-ui`, that edits
+`config.toml` and exits. It never talks to the running daemon over its socket: the
+daemon reads the file on the next capture, so there is no reload protocol to get
+wrong.
+
+```bash
+cargo run -p hippo-voice-settings
+```
+
+It is the second consumer of `hippo-ui` and the reason that library has a
+gallery and a style snapshot.
+
 ## Windows
 
 Compiles and type-checks for `x86_64-pc-windows-msvc`, but has **not been run**:

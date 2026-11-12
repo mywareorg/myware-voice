@@ -23,7 +23,20 @@ pub enum PasteMethod {
     None,
 }
 
+impl core::fmt::Display for PasteMethod {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.arg())
+    }
+}
+
 impl PasteMethod {
+    pub const ALL: [PasteMethod; 4] = [
+        PasteMethod::Auto,
+        PasteMethod::Wtype,
+        PasteMethod::Ydotool,
+        PasteMethod::None,
+    ];
+
     pub fn arg(self) -> &'static str {
         match self {
             PasteMethod::Auto => "auto",
