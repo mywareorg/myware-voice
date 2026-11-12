@@ -134,7 +134,9 @@ Fetch the native pieces with the PowerShell equivalents:
 ```
 
 `fetch-sherpa.ps1` pulls the 6.6 MB `MD-Release` archive — the only Windows build
-published — and falls back to 7-Zip when the built-in `tar` cannot handle bzip2.
+published — and extracts it with an installed 7-Zip, Git for Windows' `bzip2`, or
+a standalone 7-Zip it downloads to `%LOCALAPPDATA%\hippo-voice\cache`. The
+built-in `tar` has no bzip2, so it cannot do this alone.
 Both DLLs and `onnxruntime_providers_shared.dll` must sit beside the executable:
 Windows resolves a DLL's imports from the application directory, not from the DLL.
 
