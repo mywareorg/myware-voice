@@ -7,15 +7,34 @@
 #
 # Nothing is linked at build time, so `cargo build` works on a machine with no
 # native artifacts at all. Run this before `cargo run` or `doctor`.
+#
+# On Windows use scripts/fetch-sherpa.ps1 instead: the asset name, the DLL names
+# and the archive kind all differ.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 lock="$repo/sherpa.lock"
 
+# Read `key = "value"` from one [section] of the lock.
+read_lock() {
+    awk -v want="[$1]" -v key="$2" '
+        /^\[/ { in_section = ($0 == want); next }
+        in_section && $1 == key {
+            line = $0
+            sub(/^[^=]*=[ \t]*"/, "", line)
+            sub(/".*$/, "", line)
+            print line
+            exit
+        }
+    ' "$lock"
+}
+
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$lock")"
-url="$(sed -n 's/^url = "\(.*\)"/\1/p' "$lock")"
-sha="$(sed -n 's/^sha256 = "\(.*\)"/\1/p' "$lock")"
-archive="$(sed -n 's/^archive = "\(.*\)"/\1/p' "$lock")"
+url="$(read_lock linux url)"
+sha="$(read_lock linux sha256)"
+archive="$(read_lock linux archive)"
+
+[ -n "$url" ] || { echo "sherpa.lock has no [linux] url" >&2; exit 1; }
 
 dest="$repo/vendor"
 out="$dest/sherpa"

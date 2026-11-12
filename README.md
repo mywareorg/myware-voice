@@ -126,6 +126,18 @@ there is no Windows machine in this development environment. What is wired:
 - Delivery is `arboard` for the clipboard and `enigo` (`SendInput`) for the chord.
 - There is no toast equivalent of `notify-send` yet; failures go to the log.
 
+Fetch the native pieces with the PowerShell equivalents:
+
+```powershell
+.\scripts\fetch-sherpa.ps1
+.\scripts\fetch-model.ps1
+```
+
+`fetch-sherpa.ps1` pulls the 6.6 MB `MD-Release` archive — the only Windows build
+published — and falls back to 7-Zip when the built-in `tar` cannot handle bzip2.
+Both DLLs and `onnxruntime_providers_shared.dll` must sit beside the executable:
+Windows resolves a DLL's imports from the application directory, not from the DLL.
+
 Check it from another host with `cargo check --target x86_64-pc-windows-msvc`.
 
 ## Licence
