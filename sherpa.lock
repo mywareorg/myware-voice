@@ -1,0 +1,7 @@
+# The native runtime hippo-voice loads at run time. Pinned exactly: the C
+# struct layouts below this version do not match, and Parakeet TDT v3 needs
+# >= 1.12.15. Never bump without re-checking `size_of` in src/sherpa/mod.rs.
+version = "1.13.8"
+url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2"
+sha256 = "c0bdb7907d3a74bba1d55d22bf4d9fa75586cf1530614ebe88a27b9118e015c4"
+archive = "sherpa-onnx-v1.13.8-linux-x64-shared"

@@ -1,0 +1,29 @@
+[package]
+name = "hippo-voice"
+version = "0.1.0"
+edition = "2021"
+description = "Push-to-talk dictation: speak, and the transcript lands in the focused window."
+license = "LGPL-2.1-only"
+repository = "https://gitlab.com/librewarelive/hippo-voice"
+
+[lib]
+name = "hippo_voice"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hippo-voice"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+cpal = "0.16"
+hound = "3.5"
+libloading = "0.8"
+rubato = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
