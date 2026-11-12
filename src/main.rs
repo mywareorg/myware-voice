@@ -320,12 +320,9 @@ fn model_command(command: ModelCommand) -> Result<()> {
             println!("ok");
         }
         ModelCommand::Download => {
-            let (files, bytes) = model::download(&dir, &mut |name, done, total| {
-                if total > 0 {
-                    eprint!("\r  {name:<20} {:>3}%", done * 100 / total);
-                }
+            let (files, bytes) = model::download(&dir, &mut |name| {
+                eprintln!("  {name}");
             })?;
-            eprintln!();
             println!(
                 "fetched {files} file(s), {} MiB, into {}",
                 bytes / (1 << 20),

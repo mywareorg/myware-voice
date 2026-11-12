@@ -35,5 +35,7 @@ Rules that have already cost time elsewhere:
 
 ## Scope
 
-Windows is a later milestone. On Linux the target is sway/Wayland first; X11 is
-not a goal until someone needs it.
+Linux targets sway/Wayland first; X11 is not a goal until someone needs it.
+Windows compiles and is type-checked for `x86_64-pc-windows-msvc`, but has never
+been run, so treat its runtime behaviour as unproven until someone exercises it
+on a real machine.

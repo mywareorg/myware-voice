@@ -5,7 +5,7 @@
 //! deep inside onnxruntime with a message that says nothing about the cause.
 
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -132,8 +132,11 @@ pub fn sha256_of(path: &Path) -> Result<String> {
 
 /// Download every missing or corrupt file, resuming partial ones.
 ///
-/// Returns the number of files fetched and the bytes written.
-pub fn download(dir: &Path, progress: &mut dyn FnMut(&str, u64, u64)) -> Result<(usize, u64)> {
+/// `curl` does the transfer rather than a Rust HTTP client: it resumes with
+/// `--continue-at -`, it is present on Windows 10 and every Linux we target, and
+/// it keeps a TLS stack and its C build out of the dependency tree. The checksum
+/// is ours either way.
+pub fn download(dir: &Path, progress: &mut dyn FnMut(&str)) -> Result<(usize, u64)> {
     let lock = lock()?;
     std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
 
@@ -145,53 +148,18 @@ pub fn download(dir: &Path, progress: &mut dyn FnMut(&str, u64, u64)) -> Result<
             continue;
         }
 
-        let part = target.with_extension(format!(
-            "{}.part",
-            target.extension().and_then(|e| e.to_str()).unwrap_or("bin")
-        ));
+        progress(&file.name);
+        let part = dir.join(format!("{}.part", file.name));
         let url = format!("{}/{}", lock.base, file.name);
-
-        let mut already = std::fs::metadata(&part).map(|meta| meta.len()).unwrap_or(0);
-        let mut request = ureq::get(&url);
-        if already > 0 {
-            request = request.set("Range", &format!("bytes={already}-"));
+        let status = std::process::Command::new("curl")
+            .args(["-fSL", "--retry", "3", "--continue-at", "-", "-o"])
+            .arg(&part)
+            .arg(&url)
+            .status()
+            .context("run curl")?;
+        if !status.success() {
+            bail!("curl exited with {status} for {}", file.name);
         }
-        let response = request.call().with_context(|| format!("GET {url}"))?;
-
-        // A server that ignores Range starts from zero; drop the partial file so
-        // the two are not concatenated.
-        if already > 0 && response.status() != 206 {
-            already = 0;
-        }
-
-        let expected = response
-            .header("content-length")
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(0)
-            + already;
-
-        let mut reader = response.into_reader();
-        let mut sink = std::fs::OpenOptions::new()
-            .create(true)
-            .append(already > 0)
-            .write(true)
-            .truncate(already == 0)
-            .open(&part)
-            .with_context(|| format!("open {}", part.display()))?;
-
-        let mut written = already;
-        let mut buffer = vec![0u8; 1 << 16];
-        loop {
-            let read = reader.read(&mut buffer).context("read response")?;
-            if read == 0 {
-                break;
-            }
-            sink.write_all(&buffer[..read])?;
-            written += read as u64;
-            progress(&file.name, written, expected);
-        }
-        sink.flush()?;
-        drop(sink);
 
         if sha256_of(&part)? != file.sha256 {
             bail!(
@@ -200,9 +168,10 @@ pub fn download(dir: &Path, progress: &mut dyn FnMut(&str, u64, u64)) -> Result<
                 part.display()
             );
         }
+        let bytes = std::fs::metadata(&part).map(|meta| meta.len()).unwrap_or(0);
         std::fs::rename(&part, &target)?;
         fetched += 1;
-        total_bytes += written - already;
+        total_bytes += bytes;
     }
     Ok((fetched, total_bytes))
 }

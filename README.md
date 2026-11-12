@@ -99,6 +99,21 @@ wl-copy --trim-newline <<< "hello"; ydotool key 29:1 47:1 47:0 29:0
 Terminals get `ctrl+shift+v` rather than `ctrl+v`, and a trailing newline is
 never copied, because a newline pasted into a terminal executes a command.
 
+## Windows
+
+Compiles and type-checks for `x86_64-pc-windows-msvc`, but has **not been run**:
+there is no Windows machine in this development environment. What is wired:
+
+- The daemon registers `ctrl+space` itself with `RegisterHotKey` on a thread with
+  a message loop, because a shortcut cannot launch a command line the way sway
+  launches `hippo-voice toggle`.
+- The transport is loopback TCP on an ephemeral port with a per-run token in the
+  state directory: an open port is not authority to open a microphone.
+- Delivery is `arboard` for the clipboard and `enigo` (`SendInput`) for the chord.
+- There is no toast equivalent of `notify-send` yet; failures go to the log.
+
+Check it from another host with `cargo check --target x86_64-pc-windows-msvc`.
+
 ## Licence
 
 Code: LGPL-2.1-only.

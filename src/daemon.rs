@@ -9,7 +9,6 @@
 //! first utterance rather than paid after it.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -27,6 +26,7 @@ use crate::inject::{self, Focus};
 use crate::log;
 use crate::sherpa::Sherpa;
 use crate::tone::{self, Cue};
+use crate::transport::{self, Listener, Stream};
 
 /// Longest pause between event-loop polls. Also the status freshness.
 const TICK: Duration = Duration::from_millis(100);
@@ -78,7 +78,7 @@ impl Default for Status {
 }
 
 #[derive(Debug)]
-enum Event {
+pub enum Event {
     Toggle,
     Decoded { generation: u64, text: String },
     Failed(String),
@@ -88,6 +88,9 @@ enum Event {
 #[derive(Debug, Deserialize)]
 struct Request {
     cmd: String,
+    /// Present on Windows, where a loopback port alone is not authority.
+    #[serde(default)]
+    token: Option<String>,
 }
 
 /// The reply to a client.
@@ -106,22 +109,14 @@ pub struct Reply {
     pub error: Option<String>,
 }
 
-/// Where the socket lives. `$XDG_RUNTIME_DIR` is per-user and cleaned up at
-/// logout, which is exactly the lifetime a socket wants.
-pub fn socket_path() -> Result<PathBuf> {
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow!("XDG_RUNTIME_DIR is not set; cannot place the socket"))?;
-    Ok(base.join("hippo-voice/daemon.sock"))
-}
-
 /// One request/response round trip.
 pub fn request(command: &str) -> Result<Reply> {
-    let path = socket_path()?;
-    let mut stream =
-        UnixStream::connect(&path).with_context(|| format!("connect {}", path.display()))?;
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-    serde_json::to_writer(&mut stream, &serde_json::json!({ "cmd": command }))?;
+    let mut stream = transport::connect()?;
+    let mut body = serde_json::json!({ "cmd": command });
+    if let Some(token) = transport::token() {
+        body["token"] = serde_json::Value::String(token);
+    }
+    serde_json::to_writer(&mut stream, &body)?;
     stream.write_all(b"\n")?;
     stream.flush()?;
 
@@ -153,7 +148,6 @@ pub fn toggle() -> Result<Reply> {
 }
 
 fn spawn_daemon() -> Result<()> {
-    use std::os::unix::process::CommandExt;
     let exe = std::env::current_exe().context("current executable")?;
     let log = log::path()?;
     if let Some(dir) = log.parent() {
@@ -176,9 +170,19 @@ fn spawn_daemon() -> Result<()> {
             command.stderr(std::process::Stdio::null());
         }
     }
-    // Detach from the shortcut's process group so the shell that launched it
-    // cannot take the daemon down with it.
-    command.process_group(0);
+    // Detach from the launcher so the process that started the daemon cannot
+    // take it down: its own process group on Unix, no console on Windows.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
     command.spawn().context("spawn daemon")?;
     Ok(())
 }
@@ -400,16 +404,18 @@ impl Daemon {
 
 /// Run the daemon in the foreground until it is killed.
 pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
-    let path = socket_path()?;
-    if let Some(dir) = path.parent() {
+    if let Some(dir) = transport::endpoint_path()?.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let listener = bind(&path)?;
+    let listener = Listener::bind()?;
 
     let status = Arc::new(Mutex::new(Status::default()));
     let generation = Arc::new(AtomicU64::new(0));
     let (events_tx, events_rx) = mpsc::channel();
     let (jobs_tx, jobs_rx) = mpsc::channel();
+
+    #[cfg(windows)]
+    crate::hotkey::spawn(events_tx.clone())?;
 
     let decoder_events = events_tx.clone();
     let decoder_generation = Arc::clone(&generation);
@@ -461,50 +467,48 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
     Ok(())
 }
 
-fn bind(path: &Path) -> Result<UnixListener> {
-    match UnixListener::bind(path) {
-        Ok(listener) => Ok(listener),
-        Err(_) if UnixStream::connect(path).is_ok() => Err(anyhow!(
-            "another daemon is already listening on {}",
-            path.display()
-        )),
-        Err(_) => {
-            // Stale socket from a crash: nothing is listening, so replace it.
-            let _ = std::fs::remove_file(path);
-            UnixListener::bind(path).with_context(|| format!("bind {}", path.display()))
-        }
-    }
-}
-
 fn install_listener(
-    listener: UnixListener,
+    listener: Listener,
     status: Arc<Mutex<Status>>,
     events: Sender<Event>,
 ) -> Result<()> {
+    let token = listener.token();
     thread::Builder::new()
         .name("listener".into())
         .spawn(move || {
-            for stream in listener.incoming().flatten() {
+            while let Ok(stream) = listener.accept() {
                 let status = Arc::clone(&status);
                 let events = events.clone();
+                let token = token.clone();
                 thread::spawn(move || {
-                    let _ = serve(stream, status, events);
+                    let _ = serve(stream, status, events, token);
                 });
             }
         })?;
     Ok(())
 }
 
-fn serve(mut stream: UnixStream, status: Arc<Mutex<Status>>, events: Sender<Event>) -> Result<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+fn serve(
+    mut stream: Box<dyn Stream>,
+    status: Arc<Mutex<Status>>,
+    events: Sender<Event>,
+    token: Option<String>,
+) -> Result<()> {
     let mut line = String::new();
-    BufReader::new(stream.try_clone()?).read_line(&mut line)?;
+    BufReader::new(&mut stream).read_line(&mut line)?;
     let request: Request =
         serde_json::from_str(line.trim()).context(if line.trim().is_empty() {
             "empty request".to_string()
         } else {
             format!("parse request {line:?}")
         })?;
+
+    // Windows only: the ephemeral port is not authority, the token is.
+    if let Some(expected) = token {
+        if request.token.as_deref() != Some(expected.as_str()) {
+            anyhow::bail!("request did not carry the daemon's token");
+        }
+    }
 
     let reply = match request.cmd.as_str() {
         "toggle" => {
