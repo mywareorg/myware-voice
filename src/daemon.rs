@@ -11,6 +11,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -24,6 +25,7 @@ use crate::capture::Recorder;
 use crate::config::Config;
 use crate::inject::{self, Focus};
 use crate::sherpa::Sherpa;
+use crate::tone::{self, Cue};
 
 /// Longest pause between event-loop polls. Also the status freshness.
 const TICK: Duration = Duration::from_millis(100);
@@ -185,7 +187,14 @@ pub fn log_path() -> Result<PathBuf> {
 /// What the decoder thread is asked to do.
 enum DecodeJob {
     Warm,
-    Decode { samples: Vec<f32>, generation: u64 },
+    Decode {
+        samples: Vec<f32>,
+        generation: u64,
+        chunk_seconds: f32,
+    },
+    /// Drop the recognizer. ONNX Runtime does not return a long decode's arena
+    /// to the OS, so holding the model forever is the expensive option.
+    Unload,
 }
 
 struct Daemon {
@@ -193,7 +202,9 @@ struct Daemon {
     jobs: Sender<DecodeJob>,
     status: Arc<Mutex<Status>>,
     recorder: Option<Recorder>,
-    generation: u64,
+    generation: Arc<AtomicU64>,
+    unloaded: bool,
+    last_activity: Instant,
     started: Instant,
     focus: Option<Focus>,
 }
@@ -216,10 +227,8 @@ impl Daemon {
         match self.status.lock().map(|s| s.phase).unwrap_or(Phase::Idle) {
             Phase::Recording => self.stop_recording_and_decode(),
             // A second press during decode means "I want to talk", not "wait".
-            Phase::Decoding => {
-                self.generation += 1;
-                self.start_recording()
-            }
+            // Starting a capture bumps the generation, which abandons the decode.
+            Phase::Decoding => self.start_recording(),
             Phase::Idle => self.start_recording(),
         }
     }
@@ -227,7 +236,10 @@ impl Daemon {
     fn start_recording(&mut self) -> Result<()> {
         let recorder = Recorder::start(self.config.device.as_deref())?;
         let device = recorder.device().to_string();
-        self.generation += 1;
+        // Bumping the generation is what cancels a decode that is still running.
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        self.unloaded = false;
+        self.last_activity = Instant::now();
         self.started = Instant::now();
         self.recorder = Some(recorder);
         self.set(Phase::Recording);
@@ -237,6 +249,9 @@ impl Daemon {
         // Overlap the model load with the utterance: by the time the user stops
         // talking, the recognizer is warm.
         let _ = self.jobs.send(DecodeJob::Warm);
+        if self.config.tones {
+            tone::play(Cue::Start);
+        }
         Ok(())
     }
 
@@ -277,7 +292,8 @@ impl Daemon {
         self.jobs
             .send(DecodeJob::Decode {
                 samples,
-                generation: self.generation,
+                generation: self.generation.load(Ordering::SeqCst),
+                chunk_seconds: self.config.chunk_seconds,
             })
             .map_err(|_| anyhow!("decoder thread is gone"))?;
         Ok(())
@@ -286,9 +302,10 @@ impl Daemon {
     fn delivered(&mut self, generation: u64, text: String) -> Result<()> {
         // A late result from a cancelled capture must not be delivered into the
         // next one.
-        if generation != self.generation {
+        if generation != self.generation.load(Ordering::SeqCst) {
             return Ok(());
         }
+        self.last_activity = Instant::now();
         let text = text.trim().to_string();
         if text.is_empty() {
             self.set(Phase::Idle);
@@ -325,14 +342,33 @@ impl Daemon {
                 inject::notify("Transcript copied", "Paste failed; paste it yourself");
             }
         }
+        if self.config.tones {
+            tone::play(Cue::Done);
+        }
         self.set(Phase::Idle);
         Ok(())
+    }
+
+    /// Drop the warm model after a long idle. The next capture reloads it while
+    /// the user is already speaking, so the cost is hidden.
+    fn unload_if_idle(&mut self) {
+        let minutes = self.config.idle_unload_minutes;
+        if minutes == 0 || self.unloaded {
+            return;
+        }
+        let idle = self.last_activity.elapsed() >= Duration::from_secs(minutes as u64 * 60);
+        let phase = self.status.lock().map(|s| s.phase).unwrap_or(Phase::Idle);
+        if idle && phase == Phase::Idle {
+            if self.jobs.send(DecodeJob::Unload).is_ok() {
+                self.unloaded = true;
+            }
+        }
     }
 
     fn set(&self, phase: Phase) {
         if let Ok(mut status) = self.status.lock() {
             status.phase = phase;
-            status.generation = self.generation;
+            status.generation = self.generation.load(Ordering::SeqCst);
             status.seconds = if phase == Phase::Recording {
                 self.started.elapsed().as_secs_f32()
             } else {
@@ -343,7 +379,9 @@ impl Daemon {
 
     fn refresh_seconds(&self) {
         if let Ok(mut status) = self.status.lock() {
-            if status.phase == Phase::Recording && status.generation == self.generation {
+            if status.phase == Phase::Recording
+                && status.generation == self.generation.load(Ordering::SeqCst)
+            {
                 status.seconds = self.started.elapsed().as_secs_f32();
             }
         }
@@ -359,13 +397,23 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
     let listener = bind(&path)?;
 
     let status = Arc::new(Mutex::new(Status::default()));
+    let generation = Arc::new(AtomicU64::new(0));
     let (events_tx, events_rx) = mpsc::channel();
     let (jobs_tx, jobs_rx) = mpsc::channel();
 
     let decoder_events = events_tx.clone();
+    let decoder_generation = Arc::clone(&generation);
     thread::Builder::new()
         .name("decoder".into())
-        .spawn(move || decoder_loop(jobs_rx, decoder_events, model_dir, threads))?;
+        .spawn(move || {
+            decoder_loop(
+                jobs_rx,
+                decoder_events,
+                model_dir,
+                threads,
+                decoder_generation,
+            )
+        })?;
 
     install_listener(listener, Arc::clone(&status), events_tx.clone())?;
 
@@ -374,7 +422,9 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
         jobs: jobs_tx,
         status,
         recorder: None,
-        generation: 0,
+        generation: Arc::clone(&generation),
+        unloaded: true,
+        last_activity: Instant::now(),
         started: Instant::now(),
         focus: None,
     };
@@ -391,7 +441,10 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
                     eprintln!("event: {error:#}");
                 }
             }
-            Err(RecvTimeoutError::Timeout) => daemon.refresh_seconds(),
+            Err(RecvTimeoutError::Timeout) => {
+                daemon.refresh_seconds();
+                daemon.unload_if_idle();
+            }
             Err(RecvTimeoutError::Disconnected) => break,
         }
     }
@@ -486,6 +539,7 @@ fn decoder_loop(
     events: Sender<Event>,
     model_dir: PathBuf,
     threads: i32,
+    generation: Arc<AtomicU64>,
 ) {
     let mut loaded: Option<crate::sherpa::Recognizer> = None;
 
@@ -501,9 +555,13 @@ fn decoder_loop(
                     }
                 }
             }
+            DecodeJob::Unload => {
+                loaded = None;
+            }
             DecodeJob::Decode {
                 samples,
-                generation,
+                generation: job_generation,
+                chunk_seconds,
             } => {
                 if loaded.is_none() {
                     match load(&model_dir, threads) {
@@ -517,13 +575,32 @@ fn decoder_loop(
                 let Some(recognizer) = loaded.as_ref() else {
                     continue;
                 };
-                match recognizer.transcribe(&samples) {
-                    Ok(text) => {
-                        let _ = events.send(Event::Decoded { generation, text });
+
+                // Cut at silences, and stop between chunks if the user pressed
+                // the key again. A single decode call is not interruptible, so
+                // the chunk boundary is the cancel granularity.
+                let mut parts = Vec::new();
+                let mut abandoned = false;
+                for (start, end) in crate::audio::split_at_silence(&samples, chunk_seconds) {
+                    if generation.load(Ordering::SeqCst) != job_generation {
+                        abandoned = true;
+                        break;
                     }
-                    Err(error) => {
-                        let _ = events.send(Event::Failed(format!("{error:#}")));
+                    match recognizer.transcribe(&samples[start..end]) {
+                        Ok(text) if !text.is_empty() => parts.push(text),
+                        Ok(_) => {}
+                        Err(error) => {
+                            let _ = events.send(Event::Failed(format!("{error:#}")));
+                            abandoned = true;
+                            break;
+                        }
                     }
+                }
+                if !abandoned {
+                    let _ = events.send(Event::Decoded {
+                        generation: job_generation,
+                        text: parts.join(" "),
+                    });
                 }
             }
         }

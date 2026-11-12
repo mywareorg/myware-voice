@@ -8,6 +8,7 @@ use hippo_voice::audio;
 use hippo_voice::capture;
 use hippo_voice::config::Config;
 use hippo_voice::daemon;
+use hippo_voice::inject;
 use hippo_voice::sherpa::Sherpa;
 
 #[derive(Parser)]
@@ -205,6 +206,23 @@ fn doctor() -> Result<()> {
         Err(error) => println!("inputs        unavailable: {error}"),
     }
 
+    let config = Config::load()?;
+    println!(
+        "paste         {} -> {}",
+        config.paste.arg(),
+        inject::resolve(config.paste).arg()
+    );
+    println!(
+        "cue player    {}",
+        if inject::have("pw-play") {
+            "pw-play"
+        } else if inject::have("paplay") {
+            "paplay"
+        } else {
+            "missing (no start/stop cues)"
+        }
+    );
+
     for bin in ["wl-copy", "wl-paste", "wtype", "ydotool", "notify-send"] {
         match which(bin) {
             Some(path) => println!("{bin:<13} {path}"),
@@ -239,9 +257,24 @@ fn transcribe(path: &Path, json: bool, threads: i32) -> Result<()> {
     let recognizer = sherpa.recognizer(&dir, threads)?;
     let loaded = load_at.elapsed();
 
+    // Long clips are cut at silences: Parakeet degrades badly on one long
+    // single pass and grows memory doing it.
+    let chunk_seconds = Config::load()
+        .map(|config| config.chunk_seconds)
+        .unwrap_or(20.0);
+    let spans = audio::split_at_silence(&samples, chunk_seconds);
+
     let decode_at = Instant::now();
-    let text = recognizer.transcribe(&samples)?;
+    let mut parts = Vec::new();
+    for (start, end) in &spans {
+        let text = recognizer.transcribe(&samples[*start..*end])?;
+        if !text.is_empty() {
+            parts.push(text);
+        }
+    }
+    let text = parts.join(" ");
     let decoded = decode_at.elapsed();
+    let chunks = spans.len();
 
     let seconds = samples.len() as f32 / audio::SAMPLE_RATE as f32;
     let rtf = decoded.as_secs_f32() / seconds.max(f32::EPSILON);
@@ -255,6 +288,7 @@ fn transcribe(path: &Path, json: bool, threads: i32) -> Result<()> {
             "t_load": loaded.as_secs_f64(),
             "t_decode": decoded.as_secs_f64(),
             "rtf": rtf,
+            "chunks": chunks,
             "peak_rss_mib": peak_rss_mib(),
             "threads": threads,
         });
@@ -262,7 +296,7 @@ fn transcribe(path: &Path, json: bool, threads: i32) -> Result<()> {
     } else {
         println!("{text}");
         eprintln!(
-            "audio {seconds:.2}s · prepare {:.3}s · load {:.3}s · decode {:.3}s · RTF {rtf:.3} · peak {} MiB",
+            "audio {seconds:.2}s · {chunks} chunk(s) · prepare {:.3}s · load {:.3}s · decode {:.3}s · RTF {rtf:.3} · peak {} MiB",
             prepared.as_secs_f32(),
             loaded.as_secs_f32(),
             decoded.as_secs_f32(),

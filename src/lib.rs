@@ -9,3 +9,4 @@ pub mod config;
 pub mod daemon;
 pub mod inject;
 pub mod sherpa;
+pub mod tone;

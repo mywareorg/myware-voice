@@ -55,6 +55,41 @@ On a Ryzen 7 PRO 8840U, 4 threads, int8:
 Peak RSS above 1 GB is the warm model. The daemon loads it once and keeps it
 warm, so the load time is paid on the first utterance rather than on every one.
 
+## Keybind and autostart (sway)
+
+In `~/.config/sway/config`:
+
+```
+exec hippo-voice daemon
+bindsym --release --no-repeat ctrl+space exec hippo-voice toggle
+```
+
+`--release` and `--no-repeat` matter: without them a held key toggles in a
+storm. Starting the daemon from the sway config also gives it `WAYLAND_DISPLAY`,
+`XDG_RUNTIME_DIR` and the session bus, which a `systemd --user` unit does not
+inherit on Wayland.
+
+## Delivery
+
+Paste uses `wtype` when it is installed, otherwise `ydotool`. `ydotool` needs
+`ydotoold` running and access to `/dev/uinput`; this is a safe connectivity
+check that injects nothing:
+
+```bash
+ydotool type ''
+```
+
+Pin one with `paste = "wtype" | "ydotool" | "none"` in
+`$XDG_CONFIG_HOME/hippo-voice/config.toml`. To check injection by hand, focus a
+text field and run:
+
+```bash
+wl-copy --trim-newline <<< "hello"; ydotool key 29:1 47:1 47:0 29:0
+```
+
+Terminals get `ctrl+shift+v` rather than `ctrl+v`, and a trailing newline is
+never copied, because a newline pasted into a terminal executes a command.
+
 ## Licence
 
 Code: LGPL-2.1-only.

@@ -158,3 +158,120 @@ pub fn prepare(path: &Path) -> Result<(Vec<f32>, f32)> {
     let gain = normalize_loudness(&mut samples);
     Ok((samples, gain))
 }
+
+/// Split at silences into pieces no longer than roughly `target` seconds.
+///
+/// Parakeet must not be handed a long clip: its accuracy collapses and its
+/// memory grows, and the model card is explicit that fixed windows are not a
+/// substitute. Each cut is placed in the quietest 20 ms frame within a window
+/// around the target length, so a sentence is never divided mid-word unless the
+/// speaker never pauses.
+pub fn split_at_silence(samples: &[f32], target: f32) -> Vec<(usize, usize)> {
+    let rate = SAMPLE_RATE as f32;
+    let target_frames = (target * rate).max(1.0) as usize;
+    let frame = (0.02 * rate) as usize; // 20 ms
+    let min_frames = target_frames / 2;
+    let max_frames = (target * 1.2 * rate) as usize;
+
+    let mut spans = Vec::new();
+    let mut start = 0usize;
+    while start < samples.len() {
+        let remaining = samples.len() - start;
+        if remaining <= max_frames {
+            spans.push((start, samples.len()));
+            break;
+        }
+
+        let from = start + min_frames;
+        let to = (start + max_frames).min(samples.len() - frame);
+        if from >= to {
+            spans.push((start, samples.len()));
+            break;
+        }
+
+        // The quietest frame in the search window, measured as mean square.
+        let mut best = (f32::MAX, from);
+        let mut cursor = from;
+        while cursor + frame <= to {
+            let energy: f32 = samples[cursor..cursor + frame]
+                .iter()
+                .map(|sample| sample * sample)
+                .sum::<f32>()
+                / frame as f32;
+            if energy < best.0 {
+                best = (energy, cursor);
+            }
+            cursor += frame;
+        }
+
+        let cut = best.1 + frame / 2;
+        if cut <= start {
+            spans.push((start, samples.len()));
+            break;
+        }
+        spans.push((start, cut));
+        start = cut;
+    }
+
+    if spans.is_empty() {
+        spans.push((0, samples.len()));
+    }
+    spans
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Loud tone with silent gaps, so the quietest frame is unambiguous.
+    fn speech_like(seconds: f32) -> Vec<f32> {
+        let rate = SAMPLE_RATE as usize;
+        let total = (seconds * rate as f32) as usize;
+        (0..total)
+            .map(|index| {
+                let in_gap = (index / (rate / 2)) % 4 == 3; // 0.5 s silence every 2 s
+                if in_gap {
+                    0.0
+                } else {
+                    ((index as f32 * 0.05).sin()) * 0.3
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn long_audio_is_cut_into_target_sized_pieces() {
+        let samples = speech_like(60.0);
+        let spans = split_at_silence(&samples, 20.0);
+        assert!(spans.len() >= 3, "60 s at 20 s must not be one clip");
+        for (start, end) in &spans {
+            let seconds = (end - start) as f32 / SAMPLE_RATE as f32;
+            assert!(seconds <= 20.0 * 1.2 + 0.01, "chunk too long: {seconds}");
+        }
+        assert_eq!(spans.first().unwrap().0, 0);
+        assert_eq!(spans.last().unwrap().1, samples.len());
+        // Contiguous: no samples dropped between chunks.
+        for pair in spans.windows(2) {
+            assert_eq!(pair[0].1, pair[1].0);
+        }
+    }
+
+    #[test]
+    fn short_audio_is_left_whole() {
+        let samples = speech_like(5.0);
+        let spans = split_at_silence(&samples, 20.0);
+        assert_eq!(spans, vec![(0, samples.len())]);
+    }
+
+    #[test]
+    fn a_cut_lands_in_a_silence_when_one_is_available() {
+        let samples = speech_like(40.0);
+        let spans = split_at_silence(&samples, 20.0);
+        for (_, end) in spans.iter().take(spans.len() - 1) {
+            let from = end.saturating_sub(SAMPLE_RATE as usize / 200);
+            let to = (*end + SAMPLE_RATE as usize / 200).min(samples.len());
+            let energy: f32 = samples[from..to].iter().map(|s| s * s).sum();
+            assert!(energy < 1.0, "cut at {end} is inside speech");
+        }
+    }
+}
