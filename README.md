@@ -107,8 +107,11 @@ daemon reads the file on the next capture, so there is no reload protocol to get
 wrong.
 
 ```bash
-cargo run -p hippo-voice-settings
+cargo run --manifest-path settings/Cargo.toml
 ```
+
+It is not a workspace member: it depends on `hippo-ui` by relative path, which a
+clean clone of this repository does not contain.
 
 It is the second consumer of `hippo-ui` and the reason that library has a
 gallery and a style snapshot.

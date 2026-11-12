@@ -1,5 +1,8 @@
+# The settings window lives in settings/ but is not a workspace member: it depends
+# on hippo-ui by relative path, which does not exist in a clean clone or on CI.
+# Build it with `cargo build --manifest-path settings/Cargo.toml`.
 [workspace]
-members = ["settings"]
+exclude = ["settings"]
 resolver = "2"
 
 [package]

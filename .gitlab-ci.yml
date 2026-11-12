@@ -1,0 +1,51 @@
+# Cross-build the Windows executable on a Linux runner.
+#
+# All Windows dependencies are pure Rust or windows-sys, so mingw can link the
+# binary. What this proves: the Windows target compiles and links reproducibly,
+# the ABI size assertions hold on the real target, and the resulting executable
+# does not lean on the mingw runtime DLLs. What it cannot prove: that the sherpa
+# DLLs load, that WASAPI capture works, or that SendInput reaches a window.
+stages:
+  - build
+
+windows-cross:
+  stage: build
+  image: rust:1-bookworm
+  interruptible: true
+  variables:
+    # Statically link the CRT, so the exe does not need libgcc_s_seh-1.dll or
+    # libwinpthread-1.dll on the user's machine. Scoped to the cross target so
+    # the host test run is unaffected.
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS: "-C target-feature=+crt-static"
+    SHERPA: sherpa-onnx-v1.13.8-win-x64-shared-MD-Release-no-tts-lib
+  cache:
+    key: windows-cross-gnu
+    paths:
+      - /usr/local/cargo/registry/
+  script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 curl ca-certificates
+    - rustup target add x86_64-pc-windows-gnu
+    # Tests run on the host: a Windows binary cannot execute on this runner.
+    - cargo test -p hippo-voice
+    - cargo build --release -p hippo-voice --target x86_64-pc-windows-gnu
+    - curl -fSL --retry 3 -o "/tmp/$SHERPA.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$SHERPA.tar.bz2"
+    - tar -xjf "/tmp/$SHERPA.tar.bz2" -C /tmp
+    - mkdir -p dist
+    - cp target/x86_64-pc-windows-gnu/release/hippo-voice.exe dist/
+    - cp "/tmp/$SHERPA/lib/"*.dll dist/
+    - cp README.md LICENSE models.lock dist/
+    # Print the import table, then fail if the mingw runtime leaked in.
+    - x86_64-w64-mingw32-objdump -p dist/hippo-voice.exe | grep 'DLL Name'
+    - |
+      if x86_64-w64-mingw32-objdump -p dist/hippo-voice.exe |
+         grep -qiE 'DLL Name: (libgcc_s_seh-1|libwinpthread-1)\.dll'; then
+        echo "unexpected mingw runtime dependency; +crt-static did not take" >&2
+        exit 1
+      fi
+    - ls -l dist
+  artifacts:
+    name: hippo-voice-windows-$CI_COMMIT_SHORT_SHA
+    paths:
+      - dist/
+    expire_in: 30 days
