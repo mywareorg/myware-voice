@@ -24,7 +24,9 @@ windows-cross:
       - /usr/local/cargo/registry/
   script:
     - apt-get update
-    - apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 curl ca-certificates
+    # The host test run links cpal, which needs ALSA headers and pkg-config on
+    # Linux; the cross build does not, because it targets WASAPI.
+    - apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 curl ca-certificates pkg-config libasound2-dev
     - rustup target add x86_64-pc-windows-gnu
     # Tests run on the host: a Windows binary cannot execute on this runner.
     - cargo test -p hippo-voice
