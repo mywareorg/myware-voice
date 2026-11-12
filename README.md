@@ -40,6 +40,15 @@ cargo build
 `transcribe --json` reports `t_prepare`, `t_load`, `t_decode`, RTF and peak RSS,
 which is how the warm-model decision is measured rather than guessed.
 
+`model status | verify | download` owns the 640 MB package. `verify` hashes every
+file; `download` resumes a partial file, re-downloads one whose checksum is
+wrong, and refuses to install a bad copy.
+
+`log` prints where the daemon writes and the last lines of it; the file is capped
+at 1 MiB so a resident daemon cannot fill a disk. `history` prints the opt-in
+transcript history — off by default, pruned after `history_days`, and deleted by
+`history --clear`.
+
 Environment overrides: `HIPPO_VOICE_SHERPA_DIR`, `HIPPO_VOICE_MODEL_DIR`.
 
 ## Measured

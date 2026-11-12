@@ -9,6 +9,8 @@ use hippo_voice::capture;
 use hippo_voice::config::Config;
 use hippo_voice::daemon;
 use hippo_voice::inject;
+use hippo_voice::log;
+use hippo_voice::model;
 use hippo_voice::sherpa::Sherpa;
 
 #[derive(Parser)]
@@ -20,6 +22,16 @@ use hippo_voice::sherpa::Sherpa;
 struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Subcommand)]
+enum ModelCommand {
+    /// Show the package, its files and where it lives.
+    Status,
+    /// Hash every file and report a corrupt one.
+    Verify,
+    /// Fetch what is missing, resuming partial files.
+    Download,
 }
 
 #[derive(Subcommand)]
@@ -43,6 +55,24 @@ enum Command {
     Toggle,
     /// Print the daemon's state.
     Status,
+    /// Show the daemon log, and where it is.
+    Log {
+        #[arg(long, default_value_t = 40)]
+        lines: usize,
+    },
+    /// Show the opt-in transcript history.
+    History {
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Delete the history file.
+        #[arg(long)]
+        clear: bool,
+    },
+    /// Inspect, verify or fetch the speech model.
+    Model {
+        #[command(subcommand)]
+        command: ModelCommand,
+    },
     /// Capture from the microphone and write a WAV.
     Record {
         /// Where to write the recording.
@@ -72,6 +102,31 @@ fn main() -> Result<()> {
         Command::Daemon => {
             let dir = model_dir().context("no model directory; run scripts/fetch-model.sh")?;
             daemon::run(Config::load()?, dir, 4)
+        }
+        Command::Model { command } => model_command(command),
+        Command::Log { lines } => {
+            println!("{}", log::path()?.display());
+            for line in log::tail(lines)? {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        Command::History { limit, clear } => {
+            if clear {
+                log::clear_history()?;
+                println!("history cleared");
+                return Ok(());
+            }
+            let config = Config::load()?;
+            if !config.history {
+                println!("history is off; set `history = true` in config.toml");
+                return Ok(());
+            }
+            let entries = log::recent_history(config.history_days)?;
+            for line in entries.iter().rev().take(limit).rev() {
+                println!("{line}");
+            }
+            Ok(())
         }
         Command::Toggle => {
             let reply = daemon::toggle()?;
@@ -133,15 +188,8 @@ fn record(out: &Path, seconds: f32, device: Option<&str>) -> Result<()> {
 }
 
 /// Where the Parakeet package lives.
-fn model_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("HIPPO_VOICE_MODEL_DIR") {
-        return Some(PathBuf::from(dir));
-    }
-    let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("vendor/models/parakeet-v3-int8");
-    if dev.is_dir() {
-        return Some(dev);
-    }
-    None
+fn model_dir() -> Result<PathBuf> {
+    model::resolve_dir()
 }
 
 fn doctor() -> Result<()> {
@@ -160,26 +208,24 @@ fn doctor() -> Result<()> {
     }
 
     match model_dir() {
-        Some(dir) => {
-            let missing: Vec<&str> = [
-                "encoder.int8.onnx",
-                "decoder.int8.onnx",
-                "joiner.int8.onnx",
-                "tokens.txt",
-            ]
-            .into_iter()
-            .filter(|name| !dir.join(name).is_file())
-            .collect();
+        Ok(dir) => {
+            let rows = model::inspect(&dir, false)?;
+            let missing: Vec<&str> = rows
+                .iter()
+                .filter(|(_, state, _)| *state != model::State::Present)
+                .map(|(file, _, _)| file.name.as_str())
+                .collect();
             if missing.is_empty() {
                 println!("model         {}", dir.display());
             } else {
                 println!("model         INCOMPLETE at {}", dir.display());
                 println!("  missing     {}", missing.join(", "));
+                println!("  fix         hippo-voice model download");
             }
         }
-        None => {
+        Err(error) => {
             println!("model         MISSING");
-            println!("  fix: scripts/fetch-model.sh, or set HIPPO_VOICE_MODEL_DIR");
+            println!("  {error}");
         }
     }
 
@@ -227,6 +273,64 @@ fn doctor() -> Result<()> {
         match which(bin) {
             Some(path) => println!("{bin:<13} {path}"),
             None => println!("{bin:<13} missing"),
+        }
+    }
+    Ok(())
+}
+
+fn model_command(command: ModelCommand) -> Result<()> {
+    let lock = model::lock()?;
+    let dir = model_dir()?;
+    match command {
+        ModelCommand::Status => {
+            println!("package       {} ({})", lock.version, lock.dir);
+            println!("licence       {}", lock.license);
+            println!("attribution   {}", lock.attribution);
+            println!("directory     {}", dir.display());
+            let rows = model::inspect(&dir, false)?;
+            let mut total = 0u64;
+            for (file, state, bytes) in rows {
+                total += bytes;
+                println!(
+                    "  {:<20} {:<8} {} MiB",
+                    file.name,
+                    state.arg(),
+                    bytes / (1 << 20)
+                );
+            }
+            println!("total         {} MiB", total / (1 << 20));
+        }
+        ModelCommand::Verify => {
+            let rows = model::inspect(&dir, true)?;
+            let mut bad = 0;
+            for (file, state, bytes) in rows {
+                if state != model::State::Present {
+                    bad += 1;
+                }
+                println!(
+                    "  {:<20} {:<8} {} MiB",
+                    file.name,
+                    state.arg(),
+                    bytes / (1 << 20)
+                );
+            }
+            if bad > 0 {
+                anyhow::bail!("{bad} file(s) need downloading: hippo-voice model download");
+            }
+            println!("ok");
+        }
+        ModelCommand::Download => {
+            let (files, bytes) = model::download(&dir, &mut |name, done, total| {
+                if total > 0 {
+                    eprint!("\r  {name:<20} {:>3}%", done * 100 / total);
+                }
+            })?;
+            eprintln!();
+            println!(
+                "fetched {files} file(s), {} MiB, into {}",
+                bytes / (1 << 20),
+                dir.display()
+            );
         }
     }
     Ok(())

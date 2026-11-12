@@ -62,6 +62,11 @@ pub struct Config {
     pub max_seconds: f32,
     /// Play a tone when recording starts and when a transcript is delivered.
     pub tones: bool,
+    /// Keep delivered transcripts at rest. Off by default: the app's premise is
+    /// that transcripts stay where the user puts them.
+    pub history: bool,
+    /// Delete history entries older than this many days.
+    pub history_days: u32,
 }
 
 impl Default for Config {
@@ -74,6 +79,8 @@ impl Default for Config {
             trailing_space: true,
             max_seconds: 300.0,
             tones: true,
+            history: false,
+            history_days: 30,
         }
     }
 }

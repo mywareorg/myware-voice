@@ -8,5 +8,7 @@ pub mod capture;
 pub mod config;
 pub mod daemon;
 pub mod inject;
+pub mod log;
+pub mod model;
 pub mod sherpa;
 pub mod tone;

@@ -24,11 +24,18 @@ use crate::audio;
 use crate::capture::Recorder;
 use crate::config::Config;
 use crate::inject::{self, Focus};
+use crate::log;
 use crate::sherpa::Sherpa;
 use crate::tone::{self, Cue};
 
 /// Longest pause between event-loop polls. Also the status freshness.
 const TICK: Duration = Duration::from_millis(100);
+
+/// Report a problem to the terminal and to the log file.
+fn note(message: &str) {
+    eprintln!("{message}");
+    log::write(message);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -148,7 +155,7 @@ pub fn toggle() -> Result<Reply> {
 fn spawn_daemon() -> Result<()> {
     use std::os::unix::process::CommandExt;
     let exe = std::env::current_exe().context("current executable")?;
-    let log = log_path()?;
+    let log = log::path()?;
     if let Some(dir) = log.parent() {
         std::fs::create_dir_all(dir).ok();
     }
@@ -174,14 +181,6 @@ fn spawn_daemon() -> Result<()> {
     command.process_group(0);
     command.spawn().context("spawn daemon")?;
     Ok(())
-}
-
-pub fn log_path() -> Result<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
-        .ok_or_else(|| anyhow!("neither XDG_STATE_HOME nor HOME is set"))?;
-    Ok(base.join("hippo-voice/log"))
 }
 
 /// What the decoder thread is asked to do.
@@ -215,7 +214,7 @@ impl Daemon {
             Event::Toggle => self.toggle(),
             Event::Decoded { generation, text } => self.delivered(generation, text),
             Event::Failed(error) => {
-                eprintln!("failed: {error}");
+                note(&format!("failed: {error}"));
                 self.stop_recording();
                 self.set(Phase::Idle);
                 Ok(())
@@ -244,7 +243,7 @@ impl Daemon {
         self.recorder = Some(recorder);
         self.set(Phase::Recording);
         if let Ok(mut status) = self.status.lock() {
-            status.device = device;
+            status.device = device.clone();
         }
         // Overlap the model load with the utterance: by the time the user stops
         // talking, the recognizer is warm.
@@ -252,6 +251,7 @@ impl Daemon {
         if self.config.tones {
             tone::play(Cue::Start);
         }
+        log::write(&format!("recording on {device}"));
         Ok(())
     }
 
@@ -323,6 +323,12 @@ impl Daemon {
         }
 
         inject::copy(&text)?;
+        if self.config.history {
+            if let Err(error) = log::append_history(text.trim_end()) {
+                note(&format!("history: {error:#}"));
+            }
+            let _ = log::prune_history(self.config.history_days);
+        }
 
         let focus_now = inject::focus();
         if focus_now != self.focus {
@@ -338,13 +344,17 @@ impl Daemon {
             }
             Ok(_) => {}
             Err(error) => {
-                eprintln!("paste failed: {error:#}");
+                note(&format!("paste failed: {error:#}"));
                 inject::notify("Transcript copied", "Paste failed; paste it yourself");
             }
         }
         if self.config.tones {
             tone::play(Cue::Done);
         }
+        log::write(&format!(
+            "delivered {} chars",
+            text.trim_end().chars().count()
+        ));
         self.set(Phase::Idle);
         Ok(())
     }
@@ -433,12 +443,12 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
         match events_rx.recv_timeout(TICK) {
             Ok(Event::Toggle) => {
                 if let Err(error) = daemon.handle(Event::Toggle) {
-                    eprintln!("toggle: {error:#}");
+                    note(&format!("toggle: {error:#}"));
                 }
             }
             Ok(event) => {
                 if let Err(error) = daemon.handle(event) {
-                    eprintln!("event: {error:#}");
+                    note(&format!("event: {error:#}"));
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
