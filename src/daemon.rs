@@ -1,0 +1,538 @@
+//! The resident process: one microphone, one warm recognizer, one socket.
+//!
+//! `hippo-voice toggle` — what the compositor keybind runs — is a client of this
+//! process. The daemon never takes focus, which is the only reason a paste can
+//! land in the window the user was already typing in.
+//!
+//! Capture starts before the recognizer is asked to load. A cold load is ~1.5 s,
+//! and the user is already talking by then, so the load is overlapped with the
+//! first utterance rather than paid after it.
+
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use anyhow::{anyhow, Context, Result};
+use serde::{Deserialize, Serialize};
+
+use crate::audio;
+use crate::capture::Recorder;
+use crate::config::Config;
+use crate::inject::{self, Focus};
+use crate::sherpa::Sherpa;
+
+/// Longest pause between event-loop polls. Also the status freshness.
+const TICK: Duration = Duration::from_millis(100);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Phase {
+    Idle,
+    Recording,
+    Decoding,
+}
+
+impl Phase {
+    pub fn arg(self) -> &'static str {
+        match self {
+            Phase::Idle => "idle",
+            Phase::Recording => "recording",
+            Phase::Decoding => "decoding",
+        }
+    }
+}
+
+/// What clients can see at any moment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Status {
+    pub phase: Phase,
+    pub seconds: f32,
+    pub device: String,
+    pub generation: u64,
+    pub last_text: Option<String>,
+}
+
+impl Default for Status {
+    fn default() -> Self {
+        Self {
+            phase: Phase::Idle,
+            seconds: 0.0,
+            device: String::new(),
+            generation: 0,
+            last_text: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum Event {
+    Toggle,
+    Decoded { generation: u64, text: String },
+    Failed(String),
+}
+
+/// A request from a client.
+#[derive(Debug, Deserialize)]
+struct Request {
+    cmd: String,
+}
+
+/// The reply to a client.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Reply {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Where the socket lives. `$XDG_RUNTIME_DIR` is per-user and cleaned up at
+/// logout, which is exactly the lifetime a socket wants.
+pub fn socket_path() -> Result<PathBuf> {
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow!("XDG_RUNTIME_DIR is not set; cannot place the socket"))?;
+    Ok(base.join("hippo-voice/daemon.sock"))
+}
+
+/// One request/response round trip.
+pub fn request(command: &str) -> Result<Reply> {
+    let path = socket_path()?;
+    let mut stream =
+        UnixStream::connect(&path).with_context(|| format!("connect {}", path.display()))?;
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    serde_json::to_writer(&mut stream, &serde_json::json!({ "cmd": command }))?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line)?;
+    let reply: Reply = serde_json::from_str(&line).context("parse reply")?;
+    Ok(reply)
+}
+
+/// Send `toggle`, starting the daemon first if it is not running.
+pub fn toggle() -> Result<Reply> {
+    match request("toggle") {
+        Ok(reply) => Ok(reply),
+        Err(_) => {
+            spawn_daemon()?;
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                match request("toggle") {
+                    Ok(reply) => return Ok(reply),
+                    Err(error) if Instant::now() < deadline => {
+                        let _ = error;
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                    Err(error) => return Err(error).context("daemon did not come up"),
+                }
+            }
+        }
+    }
+}
+
+fn spawn_daemon() -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    let exe = std::env::current_exe().context("current executable")?;
+    let log = log_path()?;
+    if let Some(dir) = log.parent() {
+        std::fs::create_dir_all(dir).ok();
+    }
+    let out = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)
+        .ok();
+    let mut command = std::process::Command::new(exe);
+    command.arg("daemon").stdin(std::process::Stdio::null());
+    match out {
+        Some(file) => {
+            let err = file.try_clone()?;
+            command.stdout(file).stderr(err);
+        }
+        None => {
+            command.stdout(std::process::Stdio::null());
+            command.stderr(std::process::Stdio::null());
+        }
+    }
+    // Detach from the shortcut's process group so the shell that launched it
+    // cannot take the daemon down with it.
+    command.process_group(0);
+    command.spawn().context("spawn daemon")?;
+    Ok(())
+}
+
+pub fn log_path() -> Result<PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
+        .ok_or_else(|| anyhow!("neither XDG_STATE_HOME nor HOME is set"))?;
+    Ok(base.join("hippo-voice/log"))
+}
+
+/// What the decoder thread is asked to do.
+enum DecodeJob {
+    Warm,
+    Decode { samples: Vec<f32>, generation: u64 },
+}
+
+struct Daemon {
+    config: Config,
+    jobs: Sender<DecodeJob>,
+    status: Arc<Mutex<Status>>,
+    recorder: Option<Recorder>,
+    generation: u64,
+    started: Instant,
+    focus: Option<Focus>,
+}
+
+impl Daemon {
+    fn handle(&mut self, event: Event) -> Result<()> {
+        match event {
+            Event::Toggle => self.toggle(),
+            Event::Decoded { generation, text } => self.delivered(generation, text),
+            Event::Failed(error) => {
+                eprintln!("failed: {error}");
+                self.stop_recording();
+                self.set(Phase::Idle);
+                Ok(())
+            }
+        }
+    }
+
+    fn toggle(&mut self) -> Result<()> {
+        match self.status.lock().map(|s| s.phase).unwrap_or(Phase::Idle) {
+            Phase::Recording => self.stop_recording_and_decode(),
+            // A second press during decode means "I want to talk", not "wait".
+            Phase::Decoding => {
+                self.generation += 1;
+                self.start_recording()
+            }
+            Phase::Idle => self.start_recording(),
+        }
+    }
+
+    fn start_recording(&mut self) -> Result<()> {
+        let recorder = Recorder::start(self.config.device.as_deref())?;
+        let device = recorder.device().to_string();
+        self.generation += 1;
+        self.started = Instant::now();
+        self.recorder = Some(recorder);
+        self.set(Phase::Recording);
+        if let Ok(mut status) = self.status.lock() {
+            status.device = device;
+        }
+        // Overlap the model load with the utterance: by the time the user stops
+        // talking, the recognizer is warm.
+        let _ = self.jobs.send(DecodeJob::Warm);
+        Ok(())
+    }
+
+    fn stop_recording(&mut self) {
+        self.recorder = None;
+    }
+
+    fn stop_recording_and_decode(&mut self) -> Result<()> {
+        let Some(recorder) = self.recorder.take() else {
+            self.set(Phase::Idle);
+            return Ok(());
+        };
+
+        if let Some(failure) = recorder.failure() {
+            self.set(Phase::Idle);
+            return Err(anyhow!("audio device failed: {failure}"));
+        }
+
+        // The window that should receive the paste, recorded before the decode
+        // starts rather than after it.
+        self.focus = inject::focus();
+
+        let (samples, rate) = recorder.finish_mono();
+        let seconds = samples.len() as f32 / rate.max(1) as f32;
+        if seconds < 0.3 {
+            self.set(Phase::Idle);
+            return Ok(());
+        }
+        if seconds > self.config.max_seconds {
+            self.set(Phase::Idle);
+            return Err(anyhow!("recording was longer than the configured maximum"));
+        }
+
+        let mut samples = audio::resample(&samples, rate, audio::SAMPLE_RATE)?;
+        audio::normalize_loudness(&mut samples);
+
+        self.set(Phase::Decoding);
+        self.jobs
+            .send(DecodeJob::Decode {
+                samples,
+                generation: self.generation,
+            })
+            .map_err(|_| anyhow!("decoder thread is gone"))?;
+        Ok(())
+    }
+
+    fn delivered(&mut self, generation: u64, text: String) -> Result<()> {
+        // A late result from a cancelled capture must not be delivered into the
+        // next one.
+        if generation != self.generation {
+            return Ok(());
+        }
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            self.set(Phase::Idle);
+            return Ok(());
+        }
+
+        let text = if self.config.trailing_space {
+            format!("{text} ")
+        } else {
+            text
+        };
+
+        if let Ok(mut status) = self.status.lock() {
+            status.last_text = Some(text.trim_end().to_string());
+        }
+
+        inject::copy(&text)?;
+
+        let focus_now = inject::focus();
+        if focus_now != self.focus {
+            inject::notify("Transcript copied", "Focus changed; paste it yourself");
+            self.set(Phase::Idle);
+            return Ok(());
+        }
+
+        let method = inject::paste(self.config.paste, focus_now.as_ref());
+        match method {
+            Ok(crate::config::PasteMethod::None) => {
+                inject::notify("Transcript copied", "No paste tool available");
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("paste failed: {error:#}");
+                inject::notify("Transcript copied", "Paste failed; paste it yourself");
+            }
+        }
+        self.set(Phase::Idle);
+        Ok(())
+    }
+
+    fn set(&self, phase: Phase) {
+        if let Ok(mut status) = self.status.lock() {
+            status.phase = phase;
+            status.generation = self.generation;
+            status.seconds = if phase == Phase::Recording {
+                self.started.elapsed().as_secs_f32()
+            } else {
+                0.0
+            };
+        }
+    }
+
+    fn refresh_seconds(&self) {
+        if let Ok(mut status) = self.status.lock() {
+            if status.phase == Phase::Recording && status.generation == self.generation {
+                status.seconds = self.started.elapsed().as_secs_f32();
+            }
+        }
+    }
+}
+
+/// Run the daemon in the foreground until it is killed.
+pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
+    let path = socket_path()?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let listener = bind(&path)?;
+
+    let status = Arc::new(Mutex::new(Status::default()));
+    let (events_tx, events_rx) = mpsc::channel();
+    let (jobs_tx, jobs_rx) = mpsc::channel();
+
+    let decoder_events = events_tx.clone();
+    thread::Builder::new()
+        .name("decoder".into())
+        .spawn(move || decoder_loop(jobs_rx, decoder_events, model_dir, threads))?;
+
+    install_listener(listener, Arc::clone(&status), events_tx.clone())?;
+
+    let mut daemon = Daemon {
+        config,
+        jobs: jobs_tx,
+        status,
+        recorder: None,
+        generation: 0,
+        started: Instant::now(),
+        focus: None,
+    };
+
+    loop {
+        match events_rx.recv_timeout(TICK) {
+            Ok(Event::Toggle) => {
+                if let Err(error) = daemon.handle(Event::Toggle) {
+                    eprintln!("toggle: {error:#}");
+                }
+            }
+            Ok(event) => {
+                if let Err(error) = daemon.handle(event) {
+                    eprintln!("event: {error:#}");
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => daemon.refresh_seconds(),
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    Ok(())
+}
+
+fn bind(path: &Path) -> Result<UnixListener> {
+    match UnixListener::bind(path) {
+        Ok(listener) => Ok(listener),
+        Err(_) if UnixStream::connect(path).is_ok() => Err(anyhow!(
+            "another daemon is already listening on {}",
+            path.display()
+        )),
+        Err(_) => {
+            // Stale socket from a crash: nothing is listening, so replace it.
+            let _ = std::fs::remove_file(path);
+            UnixListener::bind(path).with_context(|| format!("bind {}", path.display()))
+        }
+    }
+}
+
+fn install_listener(
+    listener: UnixListener,
+    status: Arc<Mutex<Status>>,
+    events: Sender<Event>,
+) -> Result<()> {
+    thread::Builder::new()
+        .name("listener".into())
+        .spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let status = Arc::clone(&status);
+                let events = events.clone();
+                thread::spawn(move || {
+                    let _ = serve(stream, status, events);
+                });
+            }
+        })?;
+    Ok(())
+}
+
+fn serve(mut stream: UnixStream, status: Arc<Mutex<Status>>, events: Sender<Event>) -> Result<()> {
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    let mut line = String::new();
+    BufReader::new(stream.try_clone()?).read_line(&mut line)?;
+    let request: Request =
+        serde_json::from_str(line.trim()).context(if line.trim().is_empty() {
+            "empty request".to_string()
+        } else {
+            format!("parse request {line:?}")
+        })?;
+
+    let reply = match request.cmd.as_str() {
+        "toggle" => {
+            let _ = events.send(Event::Toggle);
+            Reply {
+                ok: true,
+                phase: None,
+                seconds: None,
+                device: None,
+                text: None,
+                error: None,
+            }
+        }
+        "status" => {
+            let snapshot = status.lock().map(|s| s.clone()).unwrap_or_default();
+            Reply {
+                ok: true,
+                phase: Some(snapshot.phase.arg().to_string()),
+                seconds: Some(snapshot.seconds),
+                device: Some(snapshot.device),
+                text: snapshot.last_text,
+                error: None,
+            }
+        }
+        other => Reply {
+            ok: false,
+            phase: None,
+            seconds: None,
+            device: None,
+            text: None,
+            error: Some(format!("unknown command {other:?}")),
+        },
+    };
+
+    serde_json::to_writer(&mut stream, &reply)?;
+    stream.write_all(b"\n")?;
+    Ok(())
+}
+
+fn decoder_loop(
+    jobs: Receiver<DecodeJob>,
+    events: Sender<Event>,
+    model_dir: PathBuf,
+    threads: i32,
+) {
+    let mut loaded: Option<crate::sherpa::Recognizer> = None;
+
+    while let Ok(job) = jobs.recv() {
+        match job {
+            DecodeJob::Warm => {
+                if loaded.is_none() {
+                    match load(&model_dir, threads) {
+                        Ok(pair) => loaded = Some(pair),
+                        Err(error) => {
+                            let _ = events.send(Event::Failed(format!("{error:#}")));
+                        }
+                    }
+                }
+            }
+            DecodeJob::Decode {
+                samples,
+                generation,
+            } => {
+                if loaded.is_none() {
+                    match load(&model_dir, threads) {
+                        Ok(pair) => loaded = Some(pair),
+                        Err(error) => {
+                            let _ = events.send(Event::Failed(format!("{error:#}")));
+                            continue;
+                        }
+                    }
+                }
+                let Some(recognizer) = loaded.as_ref() else {
+                    continue;
+                };
+                match recognizer.transcribe(&samples) {
+                    Ok(text) => {
+                        let _ = events.send(Event::Decoded { generation, text });
+                    }
+                    Err(error) => {
+                        let _ = events.send(Event::Failed(format!("{error:#}")));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Load the runtime and recognizer, then forget the borrow so the pair can live
+/// in a long-lived variable.
+fn load(model_dir: &Path, threads: i32) -> Result<crate::sherpa::Recognizer> {
+    let sherpa = Sherpa::open()?;
+    sherpa.recognizer(model_dir, threads)
+}

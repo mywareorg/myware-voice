@@ -13,6 +13,7 @@ mod bindings;
 
 use std::ffi::{CStr, CString};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context, Result};
 use libloading::Library;
@@ -107,7 +108,7 @@ pub fn resolve_library() -> Result<PathBuf> {
 }
 
 impl Sherpa {
-    pub fn load(path: &Path) -> Result<Self> {
+    pub fn load(path: &Path) -> Result<Arc<Self>> {
         // SAFETY: `Library` keeps the code mapped for as long as `fns` lives,
         // and every symbol is required for the recognizer to work at all.
         let lib =
@@ -136,16 +137,16 @@ impl Sherpa {
                 get_result: sym!(b"SherpaOnnxGetOfflineStreamResult\0", GetResult),
                 destroy_result: sym!(b"SherpaOnnxDestroyOfflineRecognizerResult\0", DestroyResult),
             };
-            Ok(Self {
+            Ok(Arc::new(Self {
                 _lib: lib,
                 fns,
                 path: path.to_path_buf(),
-            })
+            }))
         }
     }
 
     /// Load from the resolved location.
-    pub fn open() -> Result<Self> {
+    pub fn open() -> Result<Arc<Self>> {
         let path = resolve_library()?;
         Self::load(&path)
     }
@@ -165,7 +166,7 @@ impl Sherpa {
     }
 
     /// Create an offline transducer recognizer for a Parakeet model directory.
-    pub fn recognizer(&self, model_dir: &Path, threads: i32) -> Result<Recognizer<'_>> {
+    pub fn recognizer(self: &Arc<Self>, model_dir: &Path, threads: i32) -> Result<Recognizer> {
         let encoder = model_dir.join("encoder.int8.onnx");
         let decoder = model_dir.join("decoder.int8.onnx");
         let joiner = model_dir.join("joiner.int8.onnx");
@@ -214,7 +215,7 @@ impl Sherpa {
             );
         }
         Ok(Recognizer {
-            sherpa: self,
+            sherpa: Arc::clone(self),
             handle,
         })
     }
@@ -233,22 +234,26 @@ fn cpath(path: &Path) -> CString {
 }
 
 /// One recognizer. Dropping it frees the native handle.
-pub struct Recognizer<'a> {
-    sherpa: &'a Sherpa,
+///
+/// It owns an `Arc<Sherpa>` rather than borrowing one: a borrow would point at
+/// the stack slot the `Sherpa` was built in, and moving that value into a tuple
+/// or a thread would leave the recognizer holding a dangling reference.
+pub struct Recognizer {
+    sherpa: Arc<Sherpa>,
     handle: *const SherpaOnnxOfflineRecognizer,
 }
 
-// The handle is only ever used under `&self` and sherpa's recognizer is safe to
+// The handle is only used under `&self`, and sherpa's recognizer is safe to
 // share across threads for decoding distinct streams.
-unsafe impl Send for Recognizer<'_> {}
+unsafe impl Send for Recognizer {}
 
-impl Drop for Recognizer<'_> {
+impl Drop for Recognizer {
     fn drop(&mut self) {
         unsafe { (self.sherpa.fns.destroy_recognizer)(self.handle) }
     }
 }
 
-impl Recognizer<'_> {
+impl Recognizer {
     /// Decode one clip of 16 kHz mono f32.
     pub fn transcribe(&self, samples: &[f32]) -> Result<String> {
         if samples.is_empty() {

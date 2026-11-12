@@ -5,6 +5,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use hippo_voice::audio;
+use hippo_voice::capture;
+use hippo_voice::config::Config;
+use hippo_voice::daemon;
 use hippo_voice::sherpa::Sherpa;
 
 #[derive(Parser)]
@@ -33,6 +36,23 @@ enum Command {
         #[arg(long, default_value_t = 4)]
         threads: i32,
     },
+    /// Run the resident daemon in the foreground.
+    Daemon,
+    /// Start or stop recording. This is what the keybind runs.
+    Toggle,
+    /// Print the daemon's state.
+    Status,
+    /// Capture from the microphone and write a WAV.
+    Record {
+        /// Where to write the recording.
+        out: PathBuf,
+        /// How long to capture.
+        #[arg(long, default_value_t = 5.0)]
+        seconds: f32,
+        /// Input device name fragment; defaults to the host default.
+        #[arg(long)]
+        device: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -43,7 +63,72 @@ fn main() -> Result<()> {
             json,
             threads,
         } => transcribe(&path, json, threads),
+        Command::Record {
+            out,
+            seconds,
+            device,
+        } => record(&out, seconds, device.as_deref()),
+        Command::Daemon => {
+            let dir = model_dir().context("no model directory; run scripts/fetch-model.sh")?;
+            daemon::run(Config::load()?, dir, 4)
+        }
+        Command::Toggle => {
+            let reply = daemon::toggle()?;
+            match reply.phase {
+                Some(phase) => println!("{phase}"),
+                None => println!("ok"),
+            }
+            Ok(())
+        }
+        Command::Status => {
+            let reply = daemon::request("status")?;
+            if !reply.ok {
+                anyhow::bail!(reply.error.unwrap_or_else(|| "daemon error".into()));
+            }
+            println!(
+                "{} {:.1}s{}",
+                reply.phase.unwrap_or_default(),
+                reply.seconds.unwrap_or_default(),
+                reply
+                    .device
+                    .filter(|device| !device.is_empty())
+                    .map(|device| format!(" · {device}"))
+                    .unwrap_or_default()
+            );
+            if let Some(text) = reply.text {
+                println!("last: {text}");
+            }
+            Ok(())
+        }
     }
+}
+
+fn record(out: &Path, seconds: f32, device: Option<&str>) -> Result<()> {
+    let recorder = capture::Recorder::start(device)?;
+    eprintln!("capturing for {seconds:.1}s from {}", recorder.device());
+
+    let deadline = Instant::now() + std::time::Duration::from_secs_f32(seconds.max(0.1));
+    while Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        if let Some(failure) = recorder.failure() {
+            anyhow::bail!("audio device failed: {failure}");
+        }
+    }
+
+    let native = recorder.rate();
+    let (samples, rate) = recorder.finish_mono();
+    let captured = samples.len() as f32 / rate as f32;
+    let peak = samples.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+
+    let mut samples = audio::resample(&samples, rate, audio::SAMPLE_RATE)?;
+    let gain = audio::normalize_loudness(&mut samples);
+    audio::write_wav(out, &samples, audio::SAMPLE_RATE)?;
+
+    eprintln!(
+        "wrote {} · {captured:.2}s at {native} Hz · peak {peak:.3} · gain {gain:.2}",
+        out.display()
+    );
+    Ok(())
 }
 
 /// Where the Parakeet package lives.
@@ -108,6 +193,18 @@ fn doctor() -> Result<()> {
     };
 
     println!("session       {}", session_name());
+
+    match capture::input_devices() {
+        Ok(devices) if !devices.is_empty() => {
+            println!("inputs        {}", devices.len());
+            for name in devices {
+                println!("  {name}");
+            }
+        }
+        Ok(_) => println!("inputs        none"),
+        Err(error) => println!("inputs        unavailable: {error}"),
+    }
+
     for bin in ["wl-copy", "wl-paste", "wtype", "ydotool", "notify-send"] {
         match which(bin) {
             Some(path) => println!("{bin:<13} {path}"),
