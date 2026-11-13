@@ -34,7 +34,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::daemon::{Phase, Status};
 
 const WIDTH: i32 = 340;
-const HEIGHT: i32 = 92;
+const HEIGHT: i32 = 116;
 const MARGIN: i32 = 16;
 const BARS: usize = 44;
 const TICK: Duration = Duration::from_millis(100);
@@ -264,14 +264,16 @@ unsafe fn paint(window: HWND) {
     let gap = 3;
     let bar = (((right - left) - gap * (BARS as i32 - 1)) / BARS as i32).max(2);
     let top = 46;
-    let bottom = rect.bottom - 14;
+    let bottom = rect.bottom - 12;
     let centre = (top + bottom) / 2;
     let reach = ((bottom - top) / 2 - 3).max(2) as f32;
 
     let brush = CreateSolidBrush(rgb(74, 222, 128));
     for (index, level) in levels.iter().enumerate() {
-        let amplitude = level.clamp(0.0, 1.0).sqrt();
-        let half = (2.0 + amplitude * reach) as i32;
+        // Gain before the square root: speech RMS is small in absolute terms,
+        // so without it the meter barely leaves the baseline.
+        let amplitude = (level * 5.0).clamp(0.0, 1.0).sqrt();
+        let half = (3.0 + amplitude * reach) as i32;
         let x = left + index as i32 * (bar + gap);
         let column = RECT {
             left: x,
