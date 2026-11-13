@@ -154,7 +154,7 @@ Or build the release folder in one command from a checkout:
 
 It checks the toolchain, fetches the runtime if absent, runs the tests, builds
 both executables, and writes `dist\hippo-voice-<version>-win-x64` plus a zip of
-it. `-SkipTests`, `-Debug`, `-NoZip` and `-WithModel` are the useful switches; the
+it. `-SkipTests`, `-Dev`, `-NoZip` and `-WithModel` are the useful switches; the
 640 MB model is not bundled unless you ask.
 
 **Status: compiles and type-checks for `x86_64-pc-windows-msvc`, has not been

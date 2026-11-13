@@ -11,11 +11,11 @@
 # Usage:
 #   .\scripts\build-windows.ps1
 #   .\scripts\build-windows.ps1 -SkipTests
-#   .\scripts\build-windows.ps1 -Debug -NoZip
+#   .\scripts\build-windows.ps1 -Dev -NoZip
 #   .\scripts\build-windows.ps1 -WithModel
 [CmdletBinding()]
 param(
-    [switch]$Debug,
+    [switch]$Dev,
     [switch]$SkipTests,
     [switch]$WithModel,
     [switch]$NoZip
@@ -60,8 +60,8 @@ try {
     }
 
     # --- build -------------------------------------------------------------
-    $profile = if ($Debug) { 'dev' } else { 'release' }
-    $outDir = if ($Debug) { 'debug' } else { 'release' }
+    $cargoProfile = if ($Dev) { 'dev' } else { 'release' }
+    $outDir = if ($Dev) { 'debug' } else { 'release' }
 
     if (-not $SkipTests) {
         Write-Host 'running tests'
@@ -69,8 +69,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
     }
 
-    Write-Host "building ($profile)"
-    if ($Debug) {
+    Write-Host "building ($cargoProfile)"
+    if ($Dev) {
         & cargo build -p hippo-voice
     } else {
         & cargo build -p hippo-voice --release
