@@ -31,6 +31,11 @@ use crate::transport::{self, Listener, Stream};
 /// Longest pause between event-loop polls. Also the status freshness.
 const TICK: Duration = Duration::from_millis(100);
 
+/// Identifies the daemon on the wire, so a recycled port or a socket some other
+/// service has taken over cannot be mistaken for one.
+const APP: &str = "hippo-voice";
+const PROTOCOL: u32 = 1;
+
 /// A canned transcript, so the state machine can be tested with no model on
 /// disk. Read once at startup; a spawned daemon inherits it.
 /// Skip the clipboard and the paste, so a test does not need `wl-copy` or a
@@ -112,6 +117,10 @@ struct Request {
 pub struct Reply {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seconds: Option<f32>,
@@ -137,6 +146,13 @@ pub fn request(command: &str) -> Result<Reply> {
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line)?;
     let reply: Reply = serde_json::from_str(&line).context("parse reply")?;
+    // Something answered, but not us: do not adopt it, and do not start a second
+    // daemon on top of it.
+    if let Some(app) = &reply.app {
+        if app != APP {
+            anyhow::bail!("{app} is listening on the daemon endpoint, not {APP}");
+        }
+    }
     Ok(reply)
 }
 
@@ -144,6 +160,9 @@ pub fn request(command: &str) -> Result<Reply> {
 pub fn toggle() -> Result<Reply> {
     match request("toggle") {
         Ok(reply) => Ok(reply),
+        // Only "nothing is listening" starts a daemon. A live daemon that
+        // answered badly must not get a competitor.
+        Err(error) if !transport::is_unreachable(&error) => Err(error),
         Err(_) => {
             spawn_daemon()?;
             let deadline = Instant::now() + Duration::from_secs(2);
@@ -163,6 +182,16 @@ pub fn toggle() -> Result<Reply> {
 
 fn spawn_daemon() -> Result<()> {
     let exe = std::env::current_exe().context("current executable")?;
+    // Prefer the GUI-subsystem daemon binary when it is installed beside us: it
+    // opens no console window, which matters at login. Fall back to this
+    // executable's `daemon` subcommand for a development build.
+    let sibling = exe.parent().map(|dir| {
+        dir.join(if cfg!(windows) {
+            "hippo-voice-daemon.exe"
+        } else {
+            "hippo-voice-daemon"
+        })
+    });
     let log = log::path()?;
     if let Some(dir) = log.parent() {
         std::fs::create_dir_all(dir).ok();
@@ -172,8 +201,15 @@ fn spawn_daemon() -> Result<()> {
         .append(true)
         .open(&log)
         .ok();
-    let mut command = std::process::Command::new(exe);
-    command.arg("daemon").stdin(std::process::Stdio::null());
+    let mut command = match sibling.filter(|path| path.is_file()) {
+        Some(path) => std::process::Command::new(path),
+        None => {
+            let mut command = std::process::Command::new(exe);
+            command.arg("daemon");
+            command
+        }
+    };
+    command.stdin(std::process::Stdio::null());
     match out {
         Some(file) => {
             let err = file.try_clone()?;
@@ -431,6 +467,20 @@ impl Daemon {
     }
 }
 
+/// Load the configuration and the model location, then run. This is what both
+/// `hippo-voice daemon` and the `hippo-voice-daemon` binary call.
+pub fn run_process() -> Result<()> {
+    let config = Config::load()?;
+    // With a fake recognizer there is no model to find, which is how the daemon
+    // is tested on a machine that has never downloaded one.
+    let model = if std::env::var_os("HIPPO_VOICE_FAKE_MODEL").is_some() {
+        PathBuf::new()
+    } else {
+        crate::model::resolve_dir()?
+    };
+    run(config, model, 4)
+}
+
 /// Run the daemon in the foreground until it is killed.
 pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
     if let Some(dir) = transport::endpoint_path()?.parent() {
@@ -547,6 +597,8 @@ fn serve(
             let _ = events.send(Event::Toggle);
             Reply {
                 ok: true,
+                app: Some(APP.to_string()),
+                protocol: Some(PROTOCOL),
                 phase: None,
                 seconds: None,
                 device: None,
@@ -558,6 +610,8 @@ fn serve(
             let snapshot = status.lock().map(|s| s.clone()).unwrap_or_default();
             Reply {
                 ok: true,
+                app: Some(APP.to_string()),
+                protocol: Some(PROTOCOL),
                 phase: Some(snapshot.phase.arg().to_string()),
                 seconds: Some(snapshot.seconds),
                 device: Some(snapshot.device),
@@ -567,6 +621,8 @@ fn serve(
         }
         other => Reply {
             ok: false,
+            app: Some(APP.to_string()),
+            protocol: Some(PROTOCOL),
             phase: None,
             seconds: None,
             device: None,

@@ -99,10 +99,7 @@ fn main() -> Result<()> {
             seconds,
             device,
         } => record(&out, seconds, device.as_deref()),
-        Command::Daemon => {
-            let dir = model_dir().context("no model directory; run scripts/fetch-model.sh")?;
-            daemon::run(Config::load()?, dir, 4)
-        }
+        Command::Daemon => daemon::run_process(),
         Command::Model { command } => model_command(command),
         Command::Log { lines } => {
             println!("{}", log::path()?.display());

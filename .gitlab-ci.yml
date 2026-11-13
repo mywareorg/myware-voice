@@ -35,6 +35,7 @@ windows-cross:
     - tar -xjf "/tmp/$SHERPA.tar.bz2" -C /tmp
     - mkdir -p dist
     - cp target/x86_64-pc-windows-gnu/release/hippo-voice.exe dist/
+    - cp target/x86_64-pc-windows-gnu/release/hippo-voice-daemon.exe dist/
     # Only the C API and its ONNX Runtime dependencies. The cxx API is a separate
     # library the app never loads.
     - cp "/tmp/$SHERPA/lib/sherpa-onnx-c-api.dll" "/tmp/$SHERPA/lib/onnxruntime.dll" "/tmp/$SHERPA/lib/onnxruntime_providers_shared.dll" dist/

@@ -21,6 +21,11 @@ path = "src/lib.rs"
 name = "hippo-voice"
 path = "src/main.rs"
 
+# Console-free on Windows, for start-on-login.
+[[bin]]
+name = "hippo-voice-daemon"
+path = "src/bin/daemon.rs"
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

@@ -14,6 +14,30 @@ use anyhow::{Context, Result};
 pub trait Stream: Read + Write + Send {}
 impl<T: Read + Write + Send> Stream for T {}
 
+/// "Nothing is listening", as distinct from "a daemon answered and the answer was
+/// wrong". `toggle` may start a daemon only in the first case: treating a live but
+/// confused daemon as absent is how you end up with two of them fighting over the
+/// endpoint.
+#[derive(Debug)]
+pub struct Unreachable;
+
+impl std::fmt::Display for Unreachable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("no daemon is listening")
+    }
+}
+
+impl std::error::Error for Unreachable {}
+
+fn unreachable(context: String) -> anyhow::Error {
+    anyhow::Error::new(Unreachable).context(context)
+}
+
+/// Whether this error means "try starting one".
+pub fn is_unreachable(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| cause.is::<Unreachable>())
+}
+
 pub fn endpoint_path() -> Result<PathBuf> {
     #[cfg(unix)]
     {
@@ -61,11 +85,24 @@ impl Listener {
 
 #[cfg(unix)]
 pub fn connect() -> Result<Box<dyn Stream>> {
+    use std::io::ErrorKind;
+
     let path = endpoint_path()?;
-    let stream = std::os::unix::net::UnixStream::connect(&path)
-        .with_context(|| format!("connect {}", path.display()))?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
-    Ok(Box::new(stream))
+    match std::os::unix::net::UnixStream::connect(&path) {
+        Ok(stream) => {
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+            Ok(Box::new(stream))
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::NotFound | ErrorKind::ConnectionRefused
+            ) =>
+        {
+            Err(unreachable(format!("connect {}", path.display())))
+        }
+        Err(error) => Err(error).with_context(|| format!("connect {}", path.display())),
+    }
 }
 
 #[cfg(unix)]
@@ -83,6 +120,21 @@ pub struct Listener {
 impl Listener {
     pub fn bind() -> Result<Self> {
         use std::io::Write as _;
+
+        // A live daemon already owns this endpoint. Starting a second one would
+        // take the port over and then fail to register the hotkey, leaving a
+        // running process with a dead keybind.
+        if let Some((port, _)) = read_endpoint() {
+            let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+            let alive = std::net::TcpStream::connect_timeout(
+                &address,
+                std::time::Duration::from_millis(300),
+            )
+            .is_ok();
+            if alive {
+                anyhow::bail!("another daemon is already listening on 127.0.0.1:{port}");
+            }
+        }
 
         let tcp =
             std::net::TcpListener::bind(("127.0.0.1", 0)).context("bind the loopback listener")?;
@@ -113,6 +165,16 @@ impl Listener {
     }
 }
 
+/// The port and token a live daemon wrote, if the file parses.
+#[cfg(windows)]
+fn read_endpoint() -> Option<(u16, String)> {
+    let text = std::fs::read_to_string(endpoint_path().ok()?).ok()?;
+    let mut lines = text.lines();
+    let port = lines.next()?.trim().parse().ok()?;
+    let token = lines.next()?.trim().to_string();
+    Some((port, token))
+}
+
 /// 32 hex characters from the OS random source.
 #[cfg(windows)]
 fn random_token() -> String {
@@ -129,22 +191,57 @@ fn random_token() -> String {
 
 #[cfg(windows)]
 pub fn connect() -> Result<Box<dyn Stream>> {
+    use std::io::ErrorKind;
+
     let path = endpoint_path()?;
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("read {}; is the daemon running?", path.display()))?;
-    let mut lines = text.lines();
-    let port: u16 = lines
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Err(unreachable(format!("read {}", path.display())));
+        }
+        Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
+    };
+    let port: u16 = text
+        .lines()
         .next()
         .and_then(|line| line.trim().parse().ok())
         .ok_or_else(|| anyhow::anyhow!("{} has no port", path.display()))?;
-    let stream = std::net::TcpStream::connect(("127.0.0.1", port))
-        .with_context(|| format!("connect 127.0.0.1:{port}"))?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
-    Ok(Box::new(stream))
+
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    match std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_secs(2)) {
+        Ok(stream) => {
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+            Ok(Box::new(stream))
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::ConnectionRefused | ErrorKind::TimedOut
+            ) =>
+        {
+            Err(unreachable(format!("connect 127.0.0.1:{port}")))
+        }
+        Err(error) => Err(error).with_context(|| format!("connect 127.0.0.1:{port}")),
+    }
 }
 
 #[cfg(windows)]
 pub fn token() -> Option<String> {
-    let text = std::fs::read_to_string(endpoint_path().ok()?).ok()?;
-    text.lines().nth(1).map(|line| line.trim().to_string())
+    read_endpoint().map(|(_, token)| token)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_connection_failures_count_as_unreachable() {
+        let missing = unreachable("connect /nope".to_string());
+        assert!(is_unreachable(&missing));
+
+        // A daemon that answered with nonsense must not be treated as absent,
+        // or `toggle` would start a second one on top of it.
+        let confused = anyhow::anyhow!("parse reply: expected value");
+        assert!(!is_unreachable(&confused));
+    }
 }
