@@ -8,6 +8,7 @@
 //! Samples are collected at the device's own rate and interleaving, then reduced
 //! to mono and resampled by [`crate::audio`] before decoding.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
@@ -16,7 +17,8 @@ use cpal::SampleFormat;
 
 /// A running capture. Dropping it stops the device.
 pub struct Recorder {
-    stream: cpal::Stream,
+    /// `None` when replaying a file instead of holding a device.
+    backing: Option<cpal::Stream>,
     buffer: Arc<Mutex<Vec<f32>>>,
     rate: u32,
     channels: usize,
@@ -26,7 +28,29 @@ pub struct Recorder {
 
 impl Recorder {
     /// Open the named device, or the host default when `device` is `None`.
+    ///
+    /// `HIPPO_VOICE_FAKE_AUDIO` short-circuits this and replays a WAV instead,
+    /// so the daemon's state machine can be tested with no microphone. It is an
+    /// environment variable rather than a flag because a spawned daemon inherits
+    /// the environment.
     pub fn start(device: Option<&str>) -> Result<Self> {
+        if let Some(path) = fake_audio_path() {
+            let (samples, rate) = crate::audio::read_wav(&path)
+                .with_context(|| format!("fake audio {}", path.display()))?;
+            if samples.is_empty() {
+                return Err(anyhow!("fake audio {} is empty", path.display()));
+            }
+            let seconds = samples.len() as f32 / rate.max(1) as f32;
+            return Ok(Self {
+                backing: None,
+                buffer: Arc::new(Mutex::new(samples)),
+                rate,
+                channels: 1,
+                device: format!("fake audio ({seconds:.2}s)"),
+                dropped: Arc::new(Mutex::new(None)),
+            });
+        }
+
         let host = cpal::default_host();
         let device = match device {
             Some(wanted) => find_input(&host, wanted)?,
@@ -58,7 +82,7 @@ impl Recorder {
         stream.play().context("start capture")?;
 
         Ok(Self {
-            stream,
+            backing: Some(stream),
             buffer,
             rate,
             channels,
@@ -93,7 +117,7 @@ impl Recorder {
             .lock()
             .map(|samples| samples.clone())
             .unwrap_or_default();
-        drop(self.stream);
+        drop(self.backing);
         (buffer, self.rate, self.channels)
     }
 
@@ -102,6 +126,11 @@ impl Recorder {
         let (interleaved, rate, channels) = self.finish();
         (crate::audio::to_mono(&interleaved, channels), rate)
     }
+}
+
+/// A WAV to replay instead of the microphone. Tests only.
+fn fake_audio_path() -> Option<PathBuf> {
+    std::env::var_os("HIPPO_VOICE_FAKE_AUDIO").map(PathBuf::from)
 }
 
 fn find_input(host: &cpal::Host, wanted: &str) -> Result<cpal::Device> {

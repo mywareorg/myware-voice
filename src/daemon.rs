@@ -31,6 +31,20 @@ use crate::transport::{self, Listener, Stream};
 /// Longest pause between event-loop polls. Also the status freshness.
 const TICK: Duration = Duration::from_millis(100);
 
+/// A canned transcript, so the state machine can be tested with no model on
+/// disk. Read once at startup; a spawned daemon inherits it.
+/// Skip the clipboard and the paste, so a test does not need `wl-copy` or a
+/// focused window. Delivery itself has its own tests.
+fn fake_delivery() -> bool {
+    std::env::var_os("HIPPO_VOICE_FAKE_DELIVERY").is_some()
+}
+
+fn fake_model() -> Option<String> {
+    std::env::var("HIPPO_VOICE_FAKE_MODEL")
+        .ok()
+        .filter(|text| !text.is_empty())
+}
+
 /// Report a problem to the terminal and to the log file.
 fn note(message: &str) {
     eprintln!("{message}");
@@ -210,13 +224,22 @@ struct Daemon {
     last_activity: Instant,
     started: Instant,
     focus: Option<Focus>,
+    fake_delivery: bool,
 }
 
 impl Daemon {
     fn handle(&mut self, event: Event) -> Result<()> {
         match event {
             Event::Toggle => self.toggle(),
-            Event::Decoded { generation, text } => self.delivered(generation, text),
+            Event::Decoded { generation, text } => {
+                let outcome = self.delivered(generation, text);
+                // A failed copy or paste must not leave the daemon stuck in
+                // Decoding: the next press would be read as "cancel", not "record".
+                if outcome.is_err() {
+                    self.set(Phase::Idle);
+                }
+                outcome
+            }
             Event::Failed(error) => {
                 note(&format!("failed: {error}"));
                 self.stop_recording();
@@ -326,6 +349,12 @@ impl Daemon {
             status.last_text = Some(text.trim_end().to_string());
         }
 
+        if self.fake_delivery {
+            log::write("delivered (fake delivery)");
+            self.set(Phase::Idle);
+            return Ok(());
+        }
+
         inject::copy(&text)?;
         if self.config.history {
             if let Err(error) = log::append_history(text.trim_end()) {
@@ -419,6 +448,7 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
 
     let decoder_events = events_tx.clone();
     let decoder_generation = Arc::clone(&generation);
+    let fake = fake_model();
     thread::Builder::new()
         .name("decoder".into())
         .spawn(move || {
@@ -428,6 +458,7 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
                 model_dir,
                 threads,
                 decoder_generation,
+                fake,
             )
         })?;
 
@@ -443,6 +474,7 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
         last_activity: Instant::now(),
         started: Instant::now(),
         focus: None,
+        fake_delivery: fake_delivery(),
     };
 
     loop {
@@ -554,12 +586,16 @@ fn decoder_loop(
     model_dir: PathBuf,
     threads: i32,
     generation: Arc<AtomicU64>,
+    fake: Option<String>,
 ) {
     let mut loaded: Option<crate::sherpa::Recognizer> = None;
 
     while let Ok(job) = jobs.recv() {
         match job {
             DecodeJob::Warm => {
+                if fake.is_some() {
+                    continue;
+                }
                 if loaded.is_none() {
                     match load(&model_dir, threads) {
                         Ok(pair) => loaded = Some(pair),
@@ -577,6 +613,16 @@ fn decoder_loop(
                 generation: job_generation,
                 chunk_seconds,
             } => {
+                if let Some(canned) = &fake {
+                    // Stand in for a real decode, including its latency shape.
+                    // Checked first: a fake run has no model on disk to load.
+                    thread::sleep(Duration::from_millis(20));
+                    let _ = events.send(Event::Decoded {
+                        generation: job_generation,
+                        text: canned.clone(),
+                    });
+                    continue;
+                }
                 if loaded.is_none() {
                     match load(&model_dir, threads) {
                         Ok(pair) => loaded = Some(pair),
@@ -586,6 +632,7 @@ fn decoder_loop(
                         }
                     }
                 }
+
                 let Some(recognizer) = loaded.as_ref() else {
                     continue;
                 };

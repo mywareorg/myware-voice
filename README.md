@@ -51,6 +51,17 @@ transcript history — off by default, pruned after `history_days`, and deleted 
 
 Environment overrides: `HIPPO_VOICE_SHERPA_DIR`, `HIPPO_VOICE_MODEL_DIR`.
 
+## Testing
+
+Three environment variables let the whole pipeline run with no microphone and no
+model, which is how `tests/daemon.rs` drives a real daemon over its real socket
+on CI:
+
+- `HIPPO_VOICE_FAKE_AUDIO` — a WAV replayed instead of the device.
+- `HIPPO_VOICE_FAKE_MODEL` — the transcript to return instead of decoding.
+- `HIPPO_VOICE_FAKE_DELIVERY` — skip the clipboard and paste, so no external tool
+  or focused window is needed.
+
 ## Measured
 
 On a Ryzen 7 PRO 8840U, 4 threads, int8:
