@@ -84,6 +84,9 @@ pub struct Status {
     pub last_text: Option<String>,
     /// The chord in force, or why it is not. `None` while registering.
     pub hotkey: Option<String>,
+    /// RMS of the live capture, for the listening popup. Zero when idle.
+    #[serde(default)]
+    pub level: f32,
 }
 
 impl Default for Status {
@@ -95,6 +98,7 @@ impl Default for Status {
             generation: 0,
             last_text: None,
             hotkey: None,
+            level: 0.0,
         }
     }
 }
@@ -497,6 +501,7 @@ impl Daemon {
             } else {
                 0.0
             };
+            status.level = 0.0;
         }
     }
 
@@ -506,6 +511,11 @@ impl Daemon {
                 && status.generation == self.generation.load(Ordering::SeqCst)
             {
                 status.seconds = self.started.elapsed().as_secs_f32();
+                status.level = self
+                    .recorder
+                    .as_ref()
+                    .map(|recorder| recorder.level())
+                    .unwrap_or(0.0);
             }
         }
     }
@@ -569,6 +579,9 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
 
     #[cfg(windows)]
     crate::tray::spawn(events_tx.clone())?;
+
+    #[cfg(windows)]
+    crate::overlay::spawn(Arc::clone(&status))?;
 
     #[cfg(windows)]
     {

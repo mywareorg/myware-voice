@@ -15,6 +15,8 @@ pub mod hotkey;
 pub mod inject;
 pub mod log;
 pub mod model;
+#[cfg(windows)]
+pub mod overlay;
 pub mod sherpa;
 pub mod tone;
 pub mod transport;

@@ -151,7 +151,10 @@ without a console window, starts it, and prints `doctor`. The daemon also adds a
 **notification-area icon**: left click opens the settings window, right click
 opens a menu with settings, recent transcripts, **Toggle dictation** and Quit.
 The settings window is single-instance, so a second click focuses it instead of
-opening another. `-NoStartup` and
+opening another. While recording, a toast appears above the clock with the word
+"Listening", a timer and a live level meter. It is created with
+`WS_EX_NOACTIVATE`, so showing it never takes focus from the window being typed
+into. `-NoStartup` and
 `-NoPath` make it portable. `uninstall.ps1` reverses every step and asks before
 deleting the 640 MB model.
 

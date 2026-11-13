@@ -119,6 +119,28 @@ impl Recorder {
         self.dropped.lock().ok().and_then(|slot| slot.clone())
     }
 
+    /// RMS of the most recent ~2048 frames, for the listening popup.
+    ///
+    /// Deliberately cheap: the buffer is already there, and the display only
+    /// needs a number every 50 ms. It reads the tail rather than resampling, so
+    /// the meter tracks the device's own signal, not the recognizer's 16 kHz
+    /// view of it.
+    pub fn level(&self) -> f32 {
+        let Ok(samples) = self.buffer.lock() else {
+            return 0.0;
+        };
+        let channels = self.channels.max(1);
+        let frames = samples.len() / channels;
+        let take = frames.min(2048);
+        if take == 0 {
+            return 0.0;
+        }
+        let from = (frames - take) * channels;
+        let window = &samples[from..];
+        let energy: f32 = window.iter().map(|sample| sample * sample).sum();
+        (energy / window.len().max(1) as f32).sqrt()
+    }
+
     /// Stop and hand over the interleaved samples with their rate.
     pub fn finish(self) -> (Vec<f32>, u32, usize) {
         let buffer = self
