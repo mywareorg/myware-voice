@@ -82,6 +82,8 @@ pub struct Status {
     pub device: String,
     pub generation: u64,
     pub last_text: Option<String>,
+    /// The chord in force, or why it is not. `None` while registering.
+    pub hotkey: Option<String>,
 }
 
 impl Default for Status {
@@ -92,6 +94,7 @@ impl Default for Status {
             device: String::new(),
             generation: 0,
             last_text: None,
+            hotkey: None,
         }
     }
 }
@@ -128,6 +131,8 @@ pub struct Reply {
     pub device: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hotkey: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -524,8 +529,22 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
     let (events_tx, events_rx) = mpsc::channel();
     let (jobs_tx, jobs_rx) = mpsc::channel();
 
+    if let Ok(mut view) = status.lock() {
+        view.hotkey = Some(if cfg!(windows) {
+            "registering".to_string()
+        } else {
+            "compositor binding".to_string()
+        });
+    }
+
     #[cfg(windows)]
-    crate::hotkey::spawn(events_tx.clone())?;
+    {
+        let chord = crate::chord::Chord::parse(&config.hotkey).unwrap_or_else(|error| {
+            note(&format!("hotkey: {error}; falling back to ctrl+alt+space"));
+            crate::chord::Chord::parse("ctrl+alt+space").expect("the default chord is valid")
+        });
+        crate::hotkey::spawn(events_tx.clone(), chord, Arc::clone(&status))?;
+    }
 
     let decoder_events = events_tx.clone();
     let decoder_generation = Arc::clone(&generation);
@@ -635,6 +654,7 @@ fn serve(
                 seconds: None,
                 device: None,
                 text: None,
+                hotkey: None,
                 error: None,
             }
         }
@@ -648,6 +668,7 @@ fn serve(
                 seconds: Some(snapshot.seconds),
                 device: Some(snapshot.device),
                 text: snapshot.last_text,
+                hotkey: snapshot.hotkey,
                 error: None,
             }
         }
@@ -659,6 +680,7 @@ fn serve(
             seconds: None,
             device: None,
             text: None,
+            hotkey: None,
             error: Some(format!("unknown command {other:?}")),
         },
     };

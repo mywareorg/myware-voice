@@ -5,6 +5,7 @@
 
 pub mod audio;
 pub mod capture;
+pub mod chord;
 pub mod config;
 pub mod daemon;
 pub mod dirs;

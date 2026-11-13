@@ -148,6 +148,9 @@ fn main() -> Result<()> {
                     .map(|device| format!(" · {device}"))
                     .unwrap_or_default()
             );
+            if let Some(hotkey) = reply.hotkey {
+                println!("hotkey: {hotkey}");
+            }
             if let Some(text) = reply.text {
                 println!("last: {text}");
             }
@@ -269,6 +272,7 @@ fn doctor() -> Result<()> {
     {
         println!("clipboard     built in (arboard)");
         println!("paste         built in (SendInput)");
+        println!("hotkey        {}", config.hotkey);
         println!("cue player    not implemented on Windows yet");
     }
     Ok(())

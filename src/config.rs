@@ -75,6 +75,13 @@ pub struct Config {
     pub max_seconds: f32,
     /// Play a tone when recording starts and when a transcript is delivered.
     pub tones: bool,
+    /// The chord the daemon registers on Windows. Linux uses the compositor's
+    /// binding and ignores this.
+    ///
+    /// Not `ctrl+space`: that is the input-method switch on several layouts and
+    /// the autocomplete key in most editors, and `RegisterHotKey` takes it away
+    /// from them without asking.
+    pub hotkey: String,
     /// Keep delivered transcripts at rest. Off by default: the app's premise is
     /// that transcripts stay where the user puts them.
     pub history: bool,
@@ -92,6 +99,7 @@ impl Default for Config {
             trailing_space: true,
             max_seconds: 300.0,
             tones: true,
+            hotkey: "ctrl+alt+space".to_string(),
             history: false,
             history_days: 30,
         }

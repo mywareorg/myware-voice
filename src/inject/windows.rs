@@ -12,12 +12,29 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
 use crate::config::PasteMethod;
 
-/// Nothing to compare on Windows; kept so the daemon's guard compiles unchanged.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Focus;
+/// The foreground window at the moment the recording stopped.
+///
+/// Without this the guard compares `None` with `None` and never fires, so a
+/// decode that takes a second could paste into whatever window the user switched
+/// to in the meantime - the one failure a dictation tool must not have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Focus(usize);
 
 pub fn focus() -> Option<Focus> {
-    None
+    let handle = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+    if handle.is_null() {
+        None
+    } else {
+        Some(Focus(handle as usize))
+    }
+}
+
+impl Focus {
+    /// Windows terminals paste with a plain `ctrl+v`, so there is no shifted
+    /// chord to choose. Kept for symmetry with the Unix backend.
+    pub fn is_terminal(&self) -> bool {
+        false
+    }
 }
 
 /// Every paste method means the same thing here.
@@ -36,6 +53,10 @@ pub fn copy(text: &str) -> Result<()> {
 }
 
 /// Send `ctrl+v` to the foreground window.
+///
+/// An elevated foreground window will not accept injected input (UIPI). Nothing
+/// can be done about that from a normal-privilege process: the transcript stays on
+/// the clipboard and the caller's fallback tells the user to paste it.
 pub fn paste(method: PasteMethod, _focus: Option<&Focus>) -> Result<PasteMethod> {
     if method == PasteMethod::None {
         return Ok(PasteMethod::None);
