@@ -26,6 +26,16 @@ const CHUNKS: [&str; 4] = ["10 s", "15 s", "20 s", "30 s"];
 const HEADER_LOGO_SIZE: f32 = 28.0;
 
 fn main() -> iced::Result {
+    // The tray starts this with CREATE_NO_WINDOW, so an iced failure would
+    // otherwise disappear with the console.
+    let result = run();
+    if let Err(error) = &result {
+        hippo_voice::log::write(&format!("settings: {error}"));
+    }
+    result
+}
+
+fn run() -> iced::Result {
     // The tray icon launches this executable on every click. Focus the window
     // that is already open instead of stacking another one; the pane request is
     // picked up by its subscription.
@@ -524,7 +534,7 @@ fn take_requested_pane() -> Option<Pane> {
 /// deliberately never closed, so it lives exactly as long as this process.
 #[cfg(windows)]
 fn focus_running_window() -> bool {
-    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::Foundation::{GetLastError, SetLastError, ERROR_ALREADY_EXISTS};
     use windows_sys::Win32::System::Threading::CreateMutexW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
@@ -534,6 +544,10 @@ fn focus_running_window() -> bool {
     let title: Vec<u16> = "Hippo Voice\0".encode_utf16().collect();
 
     unsafe {
+        // CreateMutexW does not clear the last error on success, so a stale
+        // ERROR_ALREADY_EXISTS from earlier startup work would look like a
+        // second instance and close the first window before it opens.
+        SetLastError(0);
         let handle = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
         if handle.is_null() {
             return false;

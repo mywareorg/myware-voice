@@ -221,11 +221,14 @@ daemon with one command:
 
 It enters the Visual Studio environment when `link.exe` is missing, fetches the
 runtime if it is absent, warns when the model is missing (`-WithModel` fetches
-it), and then runs `cargo run --bin hippo-voice-daemon`. The daemon is a
+it), builds the whole workspace so `hippo-voice-settings.exe` exists beside the
+daemon, and then runs `cargo run --bin hippo-voice-daemon`. The daemon is a
 GUI-subsystem binary, so no console window survives the launch; the terminal
 stays with cargo until you Quit from the tray. `-Release` uses the release
 profile. The equivalent without the preflight checks is
-`cargo run --bin hippo-voice-daemon`.
+`cargo build --workspace` followed by `cargo run --bin hippo-voice-daemon`; the
+workspace build matters because the tray launches the settings executable from
+the daemon's own directory.
 
 A startup failure is written to `%LOCALAPPDATA%\hippo-voice\log`; the script
 prints the tail when cargo exits non-zero. Closing the terminal does not

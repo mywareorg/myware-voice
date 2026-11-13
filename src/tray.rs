@@ -331,6 +331,10 @@ fn open_settings(pane: &str) {
     let path = dir.join("hippo-voice-settings.exe");
     if !path.is_file() {
         crate::log::write(&format!("tray: {} is not installed", path.display()));
+        notify(
+            "Settings are not available",
+            "hippo-voice-settings.exe is missing beside the daemon.",
+        );
         return;
     }
 
@@ -339,6 +343,7 @@ fn open_settings(pane: &str) {
     let mut command = std::process::Command::new(path);
     command.env("HIPPO_VOICE_START_PANE", pane);
     command.creation_flags(CREATE_NO_WINDOW);
+    crate::log::write(&format!("tray: opening settings for {pane}"));
     if let Err(error) = command.spawn() {
         crate::log::write(&format!("tray: could not start settings: {error}"));
     }

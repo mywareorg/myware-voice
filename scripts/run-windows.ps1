@@ -165,6 +165,21 @@ try {
 
     $cargoArgs = @('run', '--bin', 'hippo-voice-daemon')
     if ($Release) { $cargoArgs = @('run', '--release', '--bin', 'hippo-voice-daemon') }
+
+    # The daemon launches hippo-voice-settings.exe from its own directory, and
+    # `cargo run --bin` builds only the daemon. Without this, left click finds no
+    # settings binary and the tray silently does nothing.
+    Write-Host 'building the workspace'
+    if ($Release) {
+        & cargo build --workspace --release
+    } else {
+        & cargo build --workspace
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "cargo build exited with code $LASTEXITCODE"
+        return
+    }
+
     & cargo @cargoArgs
     if ($LASTEXITCODE -ne 0) {
         $log = Join-Path $env:LOCALAPPDATA 'hippo-voice\log'
