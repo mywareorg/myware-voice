@@ -129,6 +129,10 @@ there is no Windows machine in this development environment. What is wired:
 - Delivery is `arboard` for the clipboard and `enigo` (`SendInput`) for the chord.
 - There is no toast equivalent of `notify-send` yet; failures go to the log.
 
+Files follow the platform: `%APPDATA%\hippo-voice` for configuration and
+`%LOCALAPPDATA%\hippo-voice` for logs, the endpoint file, models and cache.
+(`HOME` is usually unset on Windows, which is why nothing resolved there before.)
+
 Fetch the native pieces with the PowerShell equivalents:
 
 ```powershell

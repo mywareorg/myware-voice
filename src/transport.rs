@@ -17,16 +17,11 @@ impl<T: Read + Write + Send> Stream for T {}
 pub fn endpoint_path() -> Result<PathBuf> {
     #[cfg(unix)]
     {
-        let base = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(PathBuf::from)
-            .ok_or_else(|| {
-                anyhow::anyhow!("XDG_RUNTIME_DIR is not set; no place for the socket")
-            })?;
-        Ok(base.join("hippo-voice/daemon.sock"))
+        crate::dirs::socket_file()
     }
     #[cfg(windows)]
     {
-        Ok(crate::log::dir()?.join("endpoint"))
+        crate::dirs::endpoint_file()
     }
 }
 

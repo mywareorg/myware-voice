@@ -20,11 +20,6 @@ pub fn focus() -> Option<Focus> {
     None
 }
 
-/// Windows has no external injector to look for.
-pub fn have(_bin: &str) -> bool {
-    true
-}
-
 /// Every paste method means the same thing here.
 pub fn resolve(method: PasteMethod) -> PasteMethod {
     method

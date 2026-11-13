@@ -99,19 +99,13 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn path() -> Option<PathBuf> {
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-        Some(base.join("hippo-voice/config.toml"))
+    pub fn path() -> Result<PathBuf> {
+        crate::dirs::config_file()
     }
 
     /// Load, or return the defaults when there is no file.
     pub fn load() -> Result<Self> {
-        let Some(path) = Self::path() else {
-            return Ok(Self::default());
-        };
-        Self::load_from(&path)
+        Self::load_from(&Self::path()?)
     }
 
     pub fn load_from(path: &Path) -> Result<Self> {

@@ -39,11 +39,7 @@ pub fn lock() -> Result<Lock> {
 /// `$XDG_DATA_HOME` (or `~/.local/share`) rather than the runtime directory: the
 /// model is a 640 MB artifact that must survive logout and reboot.
 pub fn install_root() -> Result<PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
-        .ok_or_else(|| anyhow::anyhow!("neither XDG_DATA_HOME nor HOME is set"))?;
-    Ok(base.join("hippo-voice/models"))
+    crate::dirs::model_dir()
 }
 
 /// The directory the app should load from.

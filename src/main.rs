@@ -229,16 +229,6 @@ fn doctor() -> Result<()> {
         }
     }
 
-    let which = |bin: &str| {
-        std::process::Command::new("sh")
-            .arg("-c")
-            .arg(format!("command -v {bin}"))
-            .output()
-            .ok()
-            .filter(|out| out.status.success())
-            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-    };
-
     println!("session       {}", session_name());
 
     match capture::input_devices() {
@@ -258,22 +248,31 @@ fn doctor() -> Result<()> {
         config.paste.arg(),
         inject::resolve(config.paste).arg()
     );
+    #[cfg(unix)]
     println!(
         "cue player    {}",
-        if inject::have("pw-play") {
-            "pw-play"
-        } else if inject::have("paplay") {
-            "paplay"
+        if let Some(path) = inject::find("pw-play") {
+            path.display().to_string()
+        } else if let Some(path) = inject::find("paplay") {
+            path.display().to_string()
         } else {
-            "missing (no start/stop cues)"
+            "missing (no start/stop cues)".to_string()
         }
     );
 
+    #[cfg(unix)]
     for bin in ["wl-copy", "wl-paste", "wtype", "ydotool", "notify-send"] {
-        match which(bin) {
-            Some(path) => println!("{bin:<13} {path}"),
+        match inject::find(bin) {
+            Some(path) => println!("{bin:<13} {}", path.display()),
             None => println!("{bin:<13} missing"),
         }
+    }
+
+    #[cfg(windows)]
+    {
+        println!("clipboard     built in (arboard)");
+        println!("paste         built in (SendInput)");
+        println!("cue player    not implemented on Windows yet");
     }
     Ok(())
 }
@@ -334,7 +333,9 @@ fn model_command(command: ModelCommand) -> Result<()> {
 }
 
 fn session_name() -> &'static str {
-    if std::env::var_os("SWAYSOCK").is_some() {
+    if cfg!(windows) {
+        "windows (WASAPI)"
+    } else if std::env::var_os("SWAYSOCK").is_some() {
         "sway (Wayland)"
     } else if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         "Wayland"
@@ -409,15 +410,22 @@ fn transcribe(path: &Path, json: bool, threads: i32) -> Result<()> {
 
 /// Peak resident set, so the warm-model cost is measured rather than guessed.
 fn peak_rss_mib() -> u64 {
-    std::fs::read_to_string("/proc/self/status")
-        .ok()
-        .and_then(|status| {
-            status
-                .lines()
-                .find(|line| line.starts_with("VmHWM:"))
-                .and_then(|line| line.split_whitespace().nth(1).map(str::to_string))
-        })
-        .and_then(|kb| kb.parse::<u64>().ok())
-        .map(|kb| kb / 1024)
-        .unwrap_or(0)
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|status| {
+                status
+                    .lines()
+                    .find(|line| line.starts_with("VmHWM:"))
+                    .and_then(|line| line.split_whitespace().nth(1).map(str::to_string))
+            })
+            .and_then(|kb| kb.parse::<u64>().ok())
+            .map(|kb| kb / 1024)
+            .unwrap_or(0)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        0
+    }
 }

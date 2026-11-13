@@ -11,6 +11,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, bail, Context, Result};
 
+use super::have;
 use crate::config::PasteMethod;
 
 /// What the focused window looks like, as far as sway will say.
@@ -84,16 +85,6 @@ pub fn resolve(method: PasteMethod) -> PasteMethod {
             }
         }
     }
-}
-
-/// Is `bin` on `PATH`?
-pub fn have(bin: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {bin}"))
-        .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false)
 }
 
 /// Put `text` on the Wayland clipboard, without a trailing newline.

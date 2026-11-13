@@ -109,9 +109,12 @@ impl Settings {
     }
 
     fn save(&mut self) {
-        let Some(path) = Config::path() else {
-            self.error = Some("no config directory".into());
-            return;
+        let path = match Config::path() {
+            Ok(path) => path,
+            Err(error) => {
+                self.error = Some(error.to_string());
+                return;
+            }
         };
         if let Some(dir) = path.parent() {
             if let Err(error) = std::fs::create_dir_all(dir) {

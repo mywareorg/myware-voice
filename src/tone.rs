@@ -76,12 +76,12 @@ fn play_blocking(cue: Cue) -> Result<(), String> {
 }
 
 fn cue_path(cue: Cue) -> Result<PathBuf, String> {
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .ok_or("XDG_RUNTIME_DIR is not set")?;
-    let dir = base.join("hippo-voice");
-    std::fs::create_dir_all(&dir).map_err(|error| format!("create {}: {error}", dir.display()))?;
-    Ok(dir.join(format!("cue-{}.wav", cue.name())))
+    let path = crate::dirs::cue_file(cue.name()).map_err(|error| error.to_string())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|error| format!("create {}: {error}", dir.display()))?;
+    }
+    Ok(path)
 }
 
 /// A sine burst with a short fade at each end, so the speaker does not click.

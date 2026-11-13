@@ -16,19 +16,15 @@ use anyhow::{Context, Result};
 const MAX_LOG_BYTES: u64 = 1 << 20;
 
 pub fn dir() -> Result<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
-        .ok_or_else(|| anyhow::anyhow!("neither XDG_STATE_HOME nor HOME is set"))?;
-    Ok(base.join("hippo-voice"))
+    crate::dirs::state_dir()
 }
 
 pub fn path() -> Result<PathBuf> {
-    Ok(dir()?.join("log"))
+    crate::dirs::log_file()
 }
 
 pub fn history_path() -> Result<PathBuf> {
-    Ok(dir()?.join("history.tsv"))
+    crate::dirs::history_file()
 }
 
 fn ensure_dir() -> Result<()> {

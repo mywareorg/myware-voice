@@ -7,6 +7,7 @@ pub mod audio;
 pub mod capture;
 pub mod config;
 pub mod daemon;
+pub mod dirs;
 #[cfg(windows)]
 pub mod hotkey;
 pub mod inject;
