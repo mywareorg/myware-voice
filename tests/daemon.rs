@@ -8,10 +8,15 @@
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use hippo_voice::audio;
 use hippo_voice::daemon;
+
+/// The client resolves the endpoint from the process environment, which is
+/// global. One test at a time keeps the two round trips from fighting over it.
+static ENV: Mutex<()> = Mutex::new(());
 
 struct Temp(PathBuf);
 
@@ -51,9 +56,9 @@ fn wait_until(mut condition: impl FnMut() -> bool, timeout: Duration) -> bool {
     condition()
 }
 
-#[test]
-fn toggle_records_decodes_and_reports_a_transcript() {
-    let temp = Temp::new("daemon");
+/// One full press-record-press cycle, returning whatever was delivered.
+fn round_trip(name: &str, extra: &[(&str, &str)]) -> Option<String> {
+    let temp = Temp::new(name);
     let runtime = temp.0.join("run");
     let config_home = temp.0.join("config");
     let state_home = temp.0.join("state");
@@ -65,19 +70,20 @@ fn toggle_records_decodes_and_reports_a_transcript() {
     )
     .unwrap();
 
-    // Half a second of tone, which clears the daemon's minimum-utterance gate.
+    // Half a second of tone, which clears the minimum-utterance gate.
     let wav = temp.0.join("speech.wav");
     let samples: Vec<f32> = (0..8_000)
         .map(|index| (index as f32 * 0.05).sin() * 0.3)
         .collect();
     audio::write_wav(&wav, &samples, audio::SAMPLE_RATE).unwrap();
 
-    // The client in this process resolves the endpoint from the same variables.
+    // The client in this process resolves the endpoint from these.
     std::env::set_var("XDG_RUNTIME_DIR", &runtime);
     std::env::set_var("XDG_CONFIG_HOME", &config_home);
     std::env::set_var("XDG_STATE_HOME", &state_home);
 
-    let child = Command::new(env!("CARGO_BIN_EXE_hippo-voice"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_hippo-voice"));
+    command
         .arg("daemon")
         .env("XDG_RUNTIME_DIR", &runtime)
         .env("XDG_CONFIG_HOME", &config_home)
@@ -86,10 +92,12 @@ fn toggle_records_decodes_and_reports_a_transcript() {
         .env("HIPPO_VOICE_FAKE_MODEL", "hello from the test")
         .env("HIPPO_VOICE_FAKE_DELIVERY", "1")
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn the daemon");
-    let _daemon = Daemon(child);
+        .stderr(Stdio::null());
+    for (key, value) in extra {
+        command.env(key, value);
+    }
+
+    let _daemon = Daemon(command.spawn().expect("spawn the daemon"));
 
     assert!(
         wait_until(
@@ -105,9 +113,8 @@ fn toggle_records_decodes_and_reports_a_transcript() {
         wait_until(
             || daemon::request("status")
                 .ok()
-                .and_then(|status| status.phase)
-                .as_deref()
-                == Some("recording"),
+                .map(|status| status.phase.as_deref() == Some("recording"))
+                .unwrap_or(false),
             Duration::from_secs(5)
         ),
         "the daemon never started recording"
@@ -127,6 +134,24 @@ fn toggle_records_decodes_and_reports_a_transcript() {
     );
 
     let status = daemon::request("status").expect("status");
-    assert_eq!(status.text.as_deref(), Some("hello from the test"));
     assert_eq!(status.phase.as_deref(), Some("idle"));
+    status.text
+}
+
+#[test]
+fn toggle_records_decodes_and_reports_a_transcript() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let text = round_trip("daemon", &[]);
+    assert_eq!(text.as_deref(), Some("hello from the test"));
+}
+
+#[test]
+fn a_device_that_dies_mid_capture_still_delivers() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let text = round_trip("salvage", &[("HIPPO_VOICE_FAKE_AUDIO_FAILS", "1")]);
+    assert_eq!(
+        text.as_deref(),
+        Some("hello from the test"),
+        "the captured audio was discarded because the device reported a failure"
+    );
 }

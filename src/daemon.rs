@@ -328,20 +328,29 @@ impl Daemon {
             return Ok(());
         };
 
-        if let Some(failure) = recorder.failure() {
-            self.set(Phase::Idle);
-            return Err(anyhow!("audio device failed: {failure}"));
-        }
-
         // The window that should receive the paste, recorded before the decode
         // starts rather than after it.
         self.focus = inject::focus();
 
+        // A device that died mid-capture is routine on Windows (unplug, Bluetooth
+        // profile switch, sleep). Decode what arrived instead of throwing the
+        // sentence away.
+        let failure = recorder.failure();
         let (samples, rate) = recorder.finish_mono();
         let seconds = samples.len() as f32 / rate.max(1) as f32;
         if seconds < 0.3 {
+            if let Some(reason) = failure {
+                note(&format!(
+                    "audio device failed before anything was captured: {reason}"
+                ));
+            }
             self.set(Phase::Idle);
             return Ok(());
+        }
+        if let Some(reason) = &failure {
+            note(&format!(
+                "audio device failed mid-capture ({reason}); delivering {seconds:.1}s"
+            ));
         }
         if seconds > self.config.max_seconds {
             self.set(Phase::Idle);
@@ -426,6 +435,28 @@ impl Daemon {
         ));
         self.set(Phase::Idle);
         Ok(())
+    }
+
+    /// Stop by itself once a capture passes the configured maximum, so a stuck
+    /// key or a forgotten session cannot record for ever.
+    fn enforce_max_capture(&mut self) {
+        let limit = self.config.max_seconds;
+        if limit <= 0.0 {
+            return;
+        }
+        let recording = self
+            .status
+            .lock()
+            .map(|status| status.phase)
+            .unwrap_or(Phase::Idle)
+            == Phase::Recording;
+        if recording && self.started.elapsed().as_secs_f32() > limit {
+            note(&format!("capture reached the {limit:.0}s limit; stopping"));
+            if let Err(error) = self.stop_recording_and_decode() {
+                note(&format!("stop at the limit failed: {error:#}"));
+                self.set(Phase::Idle);
+            }
+        }
     }
 
     /// Drop the warm model after a long idle. The next capture reloads it while
@@ -542,6 +573,7 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
             Err(RecvTimeoutError::Timeout) => {
                 daemon.refresh_seconds();
                 daemon.unload_if_idle();
+                daemon.enforce_max_capture();
             }
             Err(RecvTimeoutError::Disconnected) => break,
         }

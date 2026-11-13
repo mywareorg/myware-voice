@@ -41,13 +41,20 @@ impl Recorder {
                 return Err(anyhow!("fake audio {} is empty", path.display()));
             }
             let seconds = samples.len() as f32 / rate.max(1) as f32;
+            // A test can ask for a device that dies immediately, which is how the
+            // salvage path is exercised without unplugging anything.
+            let dropped = if std::env::var_os("HIPPO_VOICE_FAKE_AUDIO_FAILS").is_some() {
+                Some("simulated device loss".to_string())
+            } else {
+                None
+            };
             return Ok(Self {
                 backing: None,
                 buffer: Arc::new(Mutex::new(samples)),
                 rate,
                 channels: 1,
                 device: format!("fake audio ({seconds:.2}s)"),
-                dropped: Arc::new(Mutex::new(None)),
+                dropped: Arc::new(Mutex::new(dropped)),
             });
         }
 
@@ -62,7 +69,7 @@ impl Recorder {
 
         let supported = device
             .default_input_config()
-            .with_context(|| format!("query {name}"))?;
+            .map_err(|error| explain("open the microphone", anyhow::Error::new(error)))?;
         let sample_format = supported.sample_format();
         let config: cpal::StreamConfig = supported.into();
         let rate = config.sample_rate.0;
@@ -78,8 +85,10 @@ impl Recorder {
             Arc::clone(&buffer),
             Arc::clone(&dropped),
         )
-        .with_context(|| format!("open {name}"))?;
-        stream.play().context("start capture")?;
+        .map_err(|error| explain(&format!("open {name}"), error))?;
+        stream
+            .play()
+            .map_err(|error| explain("start capture", anyhow::Error::new(error)))?;
 
         Ok(Self {
             backing: Some(stream),
@@ -128,6 +137,46 @@ impl Recorder {
     }
 }
 
+/// Turn a device error into something the user can act on.
+///
+/// The two that matter are a blocked microphone (Windows 10+ privacy setting, or
+/// a denied permission) and a device that is busy or gone. Everything else keeps
+/// the original text, which is all a bug report needs.
+fn explain(what: &str, error: anyhow::Error) -> anyhow::Error {
+    let text = format!("{error:#}").to_lowercase();
+
+    let denied = text.contains("access is denied")
+        || text.contains("permission denied")
+        || text.contains("0x80070005")
+        || text.contains("e_accessdenied");
+    if denied {
+        return if cfg!(windows) {
+            anyhow!(
+                "microphone access is off: Settings > Privacy & security > Microphone,                  then allow desktop apps ({what})"
+            )
+        } else {
+            anyhow!("microphone access was denied ({what})")
+        };
+    }
+
+    let busy = text.contains("device or resource busy")
+        || text.contains("0x8007001f")
+        || text.contains("device in use");
+    if busy {
+        return anyhow!("the microphone is being used by another program ({what})");
+    }
+
+    let gone = text.contains("no such file or directory")
+        || text.contains("0x80070490")
+        || text.contains("no default input device")
+        || text.contains("element not found");
+    if gone {
+        return anyhow!("no microphone is connected ({what})");
+    }
+
+    anyhow!("{what}: {error}")
+}
+
 /// A WAV to replay instead of the microphone. Tests only.
 fn fake_audio_path() -> Option<PathBuf> {
     std::env::var_os("HIPPO_VOICE_FAKE_AUDIO").map(PathBuf::from)
@@ -142,8 +191,14 @@ fn find_input(host: &cpal::Host, wanted: &str) -> Result<cpal::Device> {
             }
         }
     }
+    let available = input_devices().unwrap_or_default();
     Err(anyhow!(
-        "no input device matching {wanted:?}; run `hippo-voice doctor` to list them"
+        "no input device matching {wanted:?}; available: {}",
+        if available.is_empty() {
+            "none".to_string()
+        } else {
+            available.join(", ")
+        }
     ))
 }
 
@@ -231,4 +286,53 @@ fn build(
         other => return Err(anyhow!("unsupported sample format {other:?}")),
     };
     Ok(stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::explain;
+
+    #[test]
+    fn a_blocked_microphone_is_explained_in_words() {
+        let error = explain(
+            "open the microphone",
+            anyhow::anyhow!("Access is denied. (0x80070005)"),
+        );
+        let text = error.to_string();
+        assert!(text.contains("microphone access"), "{text}");
+        assert!(
+            !text.contains("0x80070005"),
+            "the raw code should not be the whole message: {text}"
+        );
+    }
+
+    #[test]
+    fn a_busy_or_absent_device_is_named() {
+        let busy = explain(
+            "open the microphone",
+            anyhow::anyhow!("Device or resource busy (os error 16)"),
+        );
+        assert!(
+            busy.to_string().contains("used by another program"),
+            "{busy}"
+        );
+
+        let gone = explain(
+            "open the microphone",
+            anyhow::anyhow!("No such file or directory (os error 2)"),
+        );
+        assert!(
+            gone.to_string().contains("no microphone is connected"),
+            "{gone}"
+        );
+    }
+
+    #[test]
+    fn anything_else_keeps_its_original_text() {
+        let odd = explain(
+            "open the microphone",
+            anyhow::anyhow!("something unexpected"),
+        );
+        assert_eq!(odd.to_string(), "open the microphone: something unexpected");
+    }
 }
