@@ -527,6 +527,15 @@ fn same_focus(captured: Option<&Focus>, now: Option<&Focus>) -> bool {
 /// Load the configuration and the model location, then run. This is what both
 /// `hippo-voice daemon` and the `hippo-voice-daemon` binary call.
 pub fn run_process() -> Result<()> {
+    crate::log::write(&format!(
+        "daemon: starting {} ({})",
+        env!("CARGO_PKG_VERSION"),
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
+    ));
     let config = Config::load()?;
     // With a fake recognizer there is no model to find, which is how the daemon
     // is tested on a machine that has never downloaded one.

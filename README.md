@@ -227,6 +227,12 @@ stays with cargo until you Quit from the tray. `-Release` uses the release
 profile. The equivalent without the preflight checks is
 `cargo run --bin hippo-voice-daemon`.
 
+A startup failure is written to `%LOCALAPPDATA%\hippo-voice\log`; the script
+prints the tail when cargo exits non-zero. Closing the terminal does not
+necessarily stop a GUI-subsystem daemon, so Quit from the tray before starting
+another one - the script detects a live endpoint and says so rather than failing
+with a bare exit code.
+
 Check it from another host with `cargo check --target x86_64-pc-windows-msvc`.
 
 ## Licence

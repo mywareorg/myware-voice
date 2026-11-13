@@ -140,11 +140,42 @@ try {
     Write-Host "log: $env:LOCALAPPDATA\hippo-voice\log"
     Write-Host ''
 
+    # A daemon from an installed copy starts at login and owns the endpoint.
+    # Starting a dev build beside it fails immediately, and the GUI daemon used
+    # to fail silently; say which process is in the way instead.
+    $endpoint = Join-Path $env:LOCALAPPDATA 'hippo-voice\endpoint'
+    if (Test-Path -LiteralPath $endpoint) {
+        $port = (Get-Content -LiteralPath $endpoint -TotalCount 1).Trim()
+        if ($port -match '^\d+$') {
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+                $task = $client.ConnectAsync('127.0.0.1', [int]$port)
+                if ($task.Wait(300) -and $client.Connected) {
+                    Write-Warning "a daemon is already listening on 127.0.0.1:$port."
+                    Write-Warning 'Quit it from its tray icon, or run `hippo-voice quit`, before starting a development build.'
+                    return
+                }
+            } catch {
+                # A stale endpoint is expected after a crash; carry on.
+            } finally {
+                $client.Close()
+            }
+        }
+    }
+
     $cargoArgs = @('run', '--bin', 'hippo-voice-daemon')
     if ($Release) { $cargoArgs = @('run', '--release', '--bin', 'hippo-voice-daemon') }
     & cargo @cargoArgs
     if ($LASTEXITCODE -ne 0) {
-        throw "cargo run failed with exit code $LASTEXITCODE"
+        $log = Join-Path $env:LOCALAPPDATA 'hippo-voice\log'
+        Write-Host ''
+        Write-Warning "cargo run exited with code $LASTEXITCODE"
+        if (Test-Path -LiteralPath $log) {
+            Write-Host "last log lines from $log"
+            Get-Content -LiteralPath $log -Tail 20 | ForEach-Object { Write-Host "  $_" }
+        } else {
+            Write-Host "no log at $log"
+        }
     }
 } finally {
     Pop-Location
