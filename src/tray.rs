@@ -106,7 +106,7 @@ pub fn spawn(events: Sender<Event>) -> Result<()> {
         .name("tray".into())
         .spawn(move || {
             if let Err(error) = run(events) {
-                crate::log::write(&format!("tray: {error:#}"));
+                crate::log::error(&format!("tray: {error:#}"));
             }
         })?;
     Ok(())
@@ -313,7 +313,7 @@ fn request_pane(pane: &str) {
         let _ = std::fs::create_dir_all(dir);
     }
     if let Err(error) = std::fs::write(&path, pane) {
-        crate::log::write(&format!(
+        crate::log::error(&format!(
             "tray: could not write {}: {error}",
             path.display()
         ));
@@ -330,7 +330,7 @@ fn open_settings(pane: &str) {
     let Some(dir) = exe.parent() else { return };
     let path = dir.join("hippo-voice-settings.exe");
     if !path.is_file() {
-        crate::log::write(&format!("tray: {} is not installed", path.display()));
+        crate::log::error(&format!("tray: {} is not installed", path.display()));
         notify(
             "Settings are not available",
             "hippo-voice-settings.exe is missing beside the daemon.",
@@ -345,6 +345,6 @@ fn open_settings(pane: &str) {
     command.creation_flags(CREATE_NO_WINDOW);
     crate::log::write(&format!("tray: opening settings for {pane}"));
     if let Err(error) = command.spawn() {
-        crate::log::write(&format!("tray: could not start settings: {error}"));
+        crate::log::error(&format!("tray: could not start settings: {error}"));
     }
 }

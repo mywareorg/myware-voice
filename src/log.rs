@@ -6,7 +6,7 @@
 //! is a decision the user should make deliberately.
 
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -14,6 +14,8 @@ use anyhow::{Context, Result};
 /// Log size after which the file is truncated. A dictation daemon should not be
 /// able to fill a disk by logging.
 const MAX_LOG_BYTES: u64 = 1 << 20;
+/// The error file is for a tester to send back, so it stays small.
+const MAX_ERROR_BYTES: u64 = 256 * 1024;
 
 pub fn dir() -> Result<PathBuf> {
     crate::dirs::state_dir()
@@ -83,6 +85,54 @@ pub fn write(message: &str) {
     {
         let _ = writeln!(file, "[{}] {message}", stamp(now()));
     }
+}
+
+/// The error file in the checkout root, when this build is running from one.
+///
+/// A tester on Windows runs the daemon from a clone; `CARGO_MANIFEST_DIR` is
+/// that clone on the build machine, which is also the checkout on the test
+/// machine for a local `cargo run`. An installed binary points at a path that
+/// no longer exists and correctly falls back to the normal log only.
+pub fn error_file() -> Option<PathBuf> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    root.is_dir().then(|| root.join("hippo-voice-error.log"))
+}
+
+/// Append an error to the log, and to the checkout-root error file.
+///
+/// This is the file to send back when Windows misbehaves: it is plain text, it
+/// sits beside the source the tester is running, and it carries the version and
+/// platform on its first line so a report does not need to be asked for them.
+pub fn error(message: &str) {
+    write(message);
+
+    let Some(path) = error_file() else { return };
+    let mut fresh = !path.exists();
+    if std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0) > MAX_ERROR_BYTES {
+        let _ = std::fs::write(&path, b"");
+        fresh = true;
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    else {
+        return;
+    };
+    if fresh {
+        let exe = std::env::current_exe()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|_| "unknown executable".to_string());
+        let _ = writeln!(
+            file,
+            "hippo-voice {} · {} {} · {}",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            exe
+        );
+    }
+    let _ = writeln!(file, "[{}] {message}", stamp(now()));
 }
 
 /// The last `count` lines of the log.

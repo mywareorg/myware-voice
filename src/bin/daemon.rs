@@ -16,7 +16,7 @@ fn main() -> ExitCode {
             // A release binary has no console, so stderr usually goes nowhere.
             // The log is the only record of why the process exited.
             let message = format!("daemon: startup failed: {error:#}");
-            hippo_voice::log::write(&message);
+            hippo_voice::log::error(&message);
             eprintln!("{message}");
             ExitCode::FAILURE
         }

@@ -241,10 +241,12 @@ workspace build matters because the tray launches the settings executable from
 the daemon's own directory.
 
 A startup failure is written to `%LOCALAPPDATA%\hippo-voice\log`; the script
-prints the tail when cargo exits non-zero. Closing the terminal does not
-necessarily stop a GUI-subsystem daemon, so Quit from the tray before starting
-another one - the script detects a live endpoint and says so rather than failing
-with a bare exit code.
+prints the tail when cargo exits non-zero. Errors from the dev build are also
+appended to `hippo-voice-error.log` in the checkout root — that file is
+gitignored, capped at 256 KB, and is the one to send back. Closing the terminal
+does not necessarily stop a GUI-subsystem daemon, so Quit from the tray before
+starting another one - the script detects a live endpoint and says so rather than
+failing with a bare exit code.
 
 Check it from another host with `cargo check --target x86_64-pc-windows-msvc`.
 

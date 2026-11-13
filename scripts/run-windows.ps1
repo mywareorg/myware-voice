@@ -84,6 +84,23 @@ function Enter-DevEnvironment {
 }
 
 $root = Split-Path $PSScriptRoot -Parent
+
+# Every failure in this script and every daemon error lands in one file beside
+# the checkout, so a Windows tester can send one path back.
+function Add-RunError {
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [string]$SourceLog
+    )
+    $target = Join-Path $root 'hippo-voice-error.log'
+    Add-Content -LiteralPath $target -Value ''
+    Add-Content -LiteralPath $target -Value "=== $Message at $(Get-Date -Format o) ==="
+    if ($SourceLog -and (Test-Path -LiteralPath $SourceLog)) {
+        Get-Content -LiteralPath $SourceLog -Tail 40 |
+            Add-Content -LiteralPath $target
+    }
+}
+
 Push-Location $root
 try {
     if ($env:OS -ne 'Windows_NT') {
@@ -177,6 +194,7 @@ try {
     }
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "cargo build exited with code $LASTEXITCODE"
+        Add-RunError "cargo build exited with code $LASTEXITCODE"
         return
     }
 
@@ -191,6 +209,7 @@ try {
         } else {
             Write-Host "no log at $log"
         }
+        Add-RunError "cargo run exited with code $LASTEXITCODE" $log
     }
 } finally {
     Pop-Location

@@ -30,7 +30,7 @@ fn main() -> iced::Result {
     // otherwise disappear with the console.
     let result = run();
     if let Err(error) = &result {
-        hippo_voice::log::write(&format!("settings: {error}"));
+        hippo_voice::log::error(&format!("settings: {error}"));
     }
     result
 }

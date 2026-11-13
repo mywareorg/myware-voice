@@ -65,7 +65,7 @@ pub fn spawn(status: Arc<Mutex<Status>>) -> Result<()> {
         .name("overlay".into())
         .spawn(move || {
             if let Err(error) = run(status) {
-                crate::log::write(&format!("overlay: {error:#}"));
+                crate::log::error(&format!("overlay: {error:#}"));
             }
         })?;
     Ok(())

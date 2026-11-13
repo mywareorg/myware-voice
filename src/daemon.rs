@@ -56,6 +56,12 @@ fn note(message: &str) {
     log::write(message);
 }
 
+/// A failure the user needs to report, not just a line in the rolling log.
+fn note_error(message: &str) {
+    eprintln!("{message}");
+    log::error(message);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Phase {
@@ -334,7 +340,7 @@ impl Daemon {
                 outcome
             }
             Event::Failed(error) => {
-                note(&format!("failed: {error}"));
+                note_error(&format!("failed: {error}"));
                 self.stop_recording();
                 self.set(Phase::Idle);
                 Ok(())
@@ -525,7 +531,7 @@ impl Daemon {
             })
             .is_err()
         {
-            note("streaming: decoder thread is gone");
+            note_error("streaming: decoder thread is gone");
             self.set(Phase::Idle);
         }
     }
@@ -725,7 +731,7 @@ impl Daemon {
             }
             Ok(_) => {}
             Err(error) => {
-                note(&format!("paste failed: {error:#}"));
+                note_error(&format!("paste failed: {error:#}"));
                 inject::notify("Transcript copied", "Paste failed; paste it yourself");
             }
         }
@@ -761,7 +767,7 @@ impl Daemon {
                 self.stop_recording_and_decode()
             };
             if let Err(error) = outcome {
-                note(&format!("stop at the limit failed: {error:#}"));
+                note_error(&format!("stop at the limit failed: {error:#}"));
                 self.set(Phase::Idle);
             }
         }
@@ -949,12 +955,12 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
             Ok(Event::Quit) => break,
             Ok(Event::Toggle) => {
                 if let Err(error) = daemon.handle(Event::Toggle) {
-                    note(&format!("toggle: {error:#}"));
+                    note_error(&format!("toggle: {error:#}"));
                 }
             }
             Ok(event) => {
                 if let Err(error) = daemon.handle(event) {
-                    note(&format!("event: {error:#}"));
+                    note_error(&format!("event: {error:#}"));
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
