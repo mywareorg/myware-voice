@@ -161,6 +161,10 @@ stages the Visual C++ runtime so a clean machine can start the exe, and writes
 `dist\hippo-voice-<version>-win-x64` plus a zip of it. `-SkipTests`, `-Dev`, `-NoZip` and `-WithModel` are the useful switches; the
 640 MB model is not bundled unless you ask.
 
+Delivery uses `SendInput`. A window running elevated — an administrator console,
+say — refuses injected input by design: the transcript stays on the clipboard and a
+tray balloon says so. Nothing at normal privilege can paste into it.
+
 The release folder needs the Visual C++ runtime beside the exes:
 `sherpa-onnx-c-api.dll` imports `vcruntime140`/`msvcp140` and `onnxruntime.dll`
 also imports `msvcp140_1`. `build-windows.ps1` stages them from the Visual Studio

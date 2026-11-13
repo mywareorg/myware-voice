@@ -62,6 +62,13 @@ pub fn paste(method: PasteMethod, _focus: Option<&Focus>) -> Result<PasteMethod>
         return Ok(PasteMethod::None);
     }
 
+    // UIPI silently discards injected input aimed at a higher-integrity window,
+    // so an elevated terminal would look like a dead keybind. Detect it first and
+    // leave the transcript on the clipboard with a message instead.
+    if foreground_is_elevated(_focus) {
+        anyhow::bail!("the focused window is running elevated; Windows blocks injected input");
+    }
+
     let mut enigo = Enigo::new(&Settings::default()).context("start input injection")?;
     enigo
         .key(Key::Control, Direction::Press)
@@ -73,7 +80,63 @@ pub fn paste(method: PasteMethod, _focus: Option<&Focus>) -> Result<PasteMethod>
     Ok(PasteMethod::Auto)
 }
 
-/// No toast backend yet; the transcript is on the clipboard either way.
+/// Whether the focused window belongs to an elevated process.
+///
+/// Returns false whenever the query is not conclusive: a failed check must not
+/// stop an ordinary paste.
+fn foreground_is_elevated(focus: Option<&Focus>) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, HWND};
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+
+    let Some(Focus(handle)) = focus else {
+        return false;
+    };
+
+    unsafe {
+        let window = *handle as HWND;
+        let mut process_id = 0u32;
+        GetWindowThreadProcessId(window, &mut process_id);
+        if process_id == 0 {
+            return false;
+        }
+
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id);
+        if process.is_null() {
+            return false;
+        }
+
+        let mut token = std::ptr::null_mut();
+        let opened = OpenProcessToken(process, TOKEN_QUERY, &mut token);
+        CloseHandle(process);
+        if opened == 0 {
+            return false;
+        }
+
+        let mut elevation: TOKEN_ELEVATION = std::mem::zeroed();
+        let mut returned = 0u32;
+        let asked = GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elevation as *mut _ as *mut core::ffi::c_void,
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        );
+        CloseHandle(token);
+
+        asked != 0 && elevation.TokenIsElevated != 0
+    }
+}
+
+/// A balloon from the tray icon, so the fallback message is visible.
 pub fn notify(summary: &str, body: &str) {
     crate::log::write(&format!("{summary}: {body}"));
+    // A balloon from the tray icon: without it the fallback message would only
+    // exist in a log file nobody opens.
+    crate::tray::notify(summary, body);
 }

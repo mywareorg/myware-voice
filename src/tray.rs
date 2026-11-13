@@ -15,7 +15,8 @@ use anyhow::Result;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_WARNING, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
@@ -40,6 +41,52 @@ struct Context {
 }
 
 static CONTEXT: OnceLock<Mutex<Option<Context>>> = OnceLock::new();
+
+/// The window the icon belongs to, so `notify` can reach it from any thread.
+///
+/// Stored as an integer because `HWND` is a raw pointer and a static must be
+/// `Send`.
+static ICON_WINDOW: OnceLock<Mutex<Option<usize>>> = OnceLock::new();
+
+fn icon_window() -> &'static Mutex<Option<usize>> {
+    ICON_WINDOW.get_or_init(|| Mutex::new(None))
+}
+
+/// Show a balloon from the tray icon.
+///
+/// This is the Windows half of the delivery fallback: when the paste cannot be
+/// made, the transcript is on the clipboard and this is how the user finds out.
+pub fn notify(title: &str, body: &str) {
+    let Some(window) = icon_window().lock().ok().and_then(|slot| *slot) else {
+        return;
+    };
+    let window = window as HWND;
+
+    unsafe {
+        let mut data: NOTIFYICONDATAW = std::mem::zeroed();
+        data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        data.hWnd = window;
+        data.uID = ICON_ID;
+        data.uFlags = NIF_INFO;
+        data.dwInfoFlags = NIIF_WARNING;
+        copy_utf16(&mut data.szInfoTitle, title);
+        copy_utf16(&mut data.szInfo, body);
+        Shell_NotifyIconW(NIM_MODIFY, &data);
+    }
+}
+
+/// Copy into a fixed NUL-terminated UTF-16 field, truncating on a char boundary.
+fn copy_utf16<const N: usize>(field: &mut [u16; N], text: &str) {
+    if N == 0 {
+        return;
+    }
+    let mut written = 0;
+    for unit in text.encode_utf16().take(N - 1) {
+        field[written] = unit;
+        written += 1;
+    }
+    field[written] = 0;
+}
 
 fn context() -> &'static Mutex<Option<Context>> {
     CONTEXT.get_or_init(|| Mutex::new(None))
@@ -114,6 +161,7 @@ fn run(events: Sender<Event>) -> Result<()> {
         if Shell_NotifyIconW(NIM_ADD, &data) == 0 {
             anyhow::bail!("the shell refused the notification-area icon");
         }
+        *icon_window().lock().unwrap() = Some(window as usize);
         crate::log::write("tray: icon added");
 
         let mut message: MSG = std::mem::zeroed();
@@ -123,6 +171,7 @@ fn run(events: Sender<Event>) -> Result<()> {
         }
 
         Shell_NotifyIconW(NIM_DELETE, &data);
+        *icon_window().lock().unwrap() = None;
         Ok(())
     }
 }

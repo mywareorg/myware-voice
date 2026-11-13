@@ -422,7 +422,7 @@ impl Daemon {
         }
 
         let focus_now = inject::focus();
-        if focus_now != self.focus {
+        if !same_focus(self.focus.as_ref(), focus_now.as_ref()) {
             inject::notify("Transcript copied", "Focus changed; paste it yourself");
             self.set(Phase::Idle);
             return Ok(());
@@ -508,6 +508,19 @@ impl Daemon {
                 status.seconds = self.started.elapsed().as_secs_f32();
             }
         }
+    }
+}
+
+/// Whether the transcript may be pasted where the focus is now.
+///
+/// A window that changed during the decode means the user moved on, and pasting
+/// there is worse than not pasting. If focus was never readable there is nothing
+/// to compare, so the paste proceeds; if it was readable at stop but is not now,
+/// it does not.
+fn same_focus(captured: Option<&Focus>, now: Option<&Focus>) -> bool {
+    match captured {
+        None => true,
+        Some(captured) => now.is_some_and(|now| captured == now),
     }
 }
 
@@ -809,4 +822,38 @@ fn decoder_loop(
 fn load(model_dir: &Path, threads: i32) -> Result<crate::sherpa::Recognizer> {
     let sherpa = Sherpa::open()?;
     sherpa.recognizer(model_dir, threads)
+}
+
+#[cfg(all(test, unix))]
+mod focus_tests {
+    use super::*;
+
+    fn at(app: &str) -> Focus {
+        Focus {
+            app_id: app.to_string(),
+            title: "window".to_string(),
+        }
+    }
+
+    #[test]
+    fn an_unchanged_window_is_pasted_into() {
+        assert!(same_focus(Some(&at("editor")), Some(&at("editor"))));
+    }
+
+    #[test]
+    fn a_window_that_changed_during_the_decode_is_not() {
+        assert!(!same_focus(Some(&at("editor")), Some(&at("browser"))));
+    }
+
+    #[test]
+    fn focus_we_could_never_read_still_pastes() {
+        // No compositor API: there is nothing to compare, and refusing would
+        // make the app useless on that desktop.
+        assert!(same_focus(None, None));
+    }
+
+    #[test]
+    fn losing_focus_after_capturing_it_does_not_paste() {
+        assert!(!same_focus(Some(&at("editor")), None));
+    }
 }
