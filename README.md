@@ -146,6 +146,17 @@ deleting the 640 MB model.
 Unsigned executables make SmartScreen say "Windows protected your PC" until you
 choose More info → Run anyway. That is a signing certificate decision, not a bug.
 
+Or build the release folder in one command from a checkout:
+
+```powershell
+.\scripts\build-windows.ps1
+```
+
+It checks the toolchain, fetches the runtime if absent, runs the tests, builds
+both executables, and writes `dist\hippo-voice-<version>-win-x64` plus a zip of
+it. `-SkipTests`, `-Debug`, `-NoZip` and `-WithModel` are the useful switches; the
+640 MB model is not bundled unless you ask.
+
 **Status: compiles and type-checks for `x86_64-pc-windows-msvc`, has not been
 run.** What is wired:
 
