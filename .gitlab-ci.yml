@@ -30,6 +30,8 @@ windows-cross:
     - rustup target add x86_64-pc-windows-gnu
     # Tests run on the host: a Windows binary cannot execute on this runner.
     - cargo test -p hippo-voice
+    # Only the daemon crate: the settings window pulls iced and wgpu, which are
+    # built by scripts/build-windows.ps1 on a real Windows machine instead.
     - cargo build --release -p hippo-voice --target x86_64-pc-windows-gnu
     - curl -fSL --retry 3 -o "/tmp/$SHERPA.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$SHERPA.tar.bz2"
     - tar -xjf "/tmp/$SHERPA.tar.bz2" -C /tmp

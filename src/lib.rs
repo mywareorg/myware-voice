@@ -9,6 +9,7 @@ pub mod chord;
 pub mod config;
 pub mod daemon;
 pub mod dirs;
+pub mod history;
 #[cfg(windows)]
 pub mod hotkey;
 pub mod inject;
@@ -17,3 +18,5 @@ pub mod model;
 pub mod sherpa;
 pub mod tone;
 pub mod transport;
+#[cfg(windows)]
+pub mod tray;

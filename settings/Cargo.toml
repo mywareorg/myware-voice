@@ -15,6 +15,6 @@ path = "src/main.rs"
 # only reason this binary depends on the daemon crate, and it never talks to the
 # running daemon over its socket.
 hippo-voice = { path = ".." }
-hippo-ui = { path = "../../hippo-ui/crates/hippo-ui", features = ["serde"] }
+hippo-ui = { git = "https://gitlab.com/librewarelive/hippo-ui", branch = "main", features = ["serde"] }
 iced = { version = "0.13", features = ["tokio", "advanced"] }
 toml = "0.8"

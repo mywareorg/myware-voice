@@ -118,11 +118,12 @@ daemon reads the file on the next capture, so there is no reload protocol to get
 wrong.
 
 ```bash
-cargo run --manifest-path settings/Cargo.toml
+cargo run -p hippo-voice-settings
 ```
 
-It is not a workspace member: it depends on `hippo-ui` by relative path, which a
-clean clone of this repository does not contain.
+Two panes: settings, and the transcripts kept when "Keep history" is on. It reads
+`config.toml` and `history.tsv` and writes only the former, so the daemon needs no
+reload protocol.
 
 It is the second consumer of `hippo-ui` and the reason that library has a
 gallery and a style snapshot.
@@ -136,10 +137,12 @@ Install for the current user from the release folder — no administrator rights
 hippo-voice model download
 ```
 
-`install.ps1` copies both executables and the runtime DLLs to
+`install.ps1` copies all three executables and the runtime DLLs to
 `%LOCALAPPDATA%\Programs\hippo-voice`, adds that folder to the user `PATH`,
 registers `hippo-voice-daemon.exe` under `HKCU\...\Run` so it starts at login
-without a console window, starts it, and prints `doctor`. `-NoStartup` and
+without a console window, starts it, and prints `doctor`. The daemon also adds a
+**notification-area icon**: left or right click for Settings and history, recent
+transcripts, or Quit. `-NoStartup` and
 `-NoPath` make it portable. `uninstall.ps1` reverses every step and asks before
 deleting the 640 MB model.
 

@@ -8,6 +8,7 @@ use hippo_voice::audio;
 use hippo_voice::capture;
 use hippo_voice::config::Config;
 use hippo_voice::daemon;
+use hippo_voice::history;
 use hippo_voice::inject;
 use hippo_voice::log;
 use hippo_voice::model;
@@ -112,7 +113,7 @@ fn main() -> Result<()> {
         }
         Command::History { limit, clear } => {
             if clear {
-                log::clear_history()?;
+                history::clear()?;
                 println!("history cleared");
                 return Ok(());
             }
@@ -121,9 +122,9 @@ fn main() -> Result<()> {
                 println!("history is off; set `history = true` in config.toml");
                 return Ok(());
             }
-            let entries = log::recent_history(config.history_days)?;
-            for line in entries.iter().rev().take(limit).rev() {
-                println!("{line}");
+            let entries = history::recent(config.history_days)?;
+            for entry in entries.iter().rev().take(limit).rev() {
+                println!("{}  {}", log::stamp(entry.epoch), entry.text);
             }
             Ok(())
         }

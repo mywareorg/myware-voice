@@ -106,68 +106,6 @@ pub fn tail(count: usize) -> Result<Vec<String>> {
     Ok(lines)
 }
 
-/// Append a delivered transcript. `1` is a tab: the text may contain anything.
-pub fn append_history(text: &str) -> Result<()> {
-    ensure_dir()?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_path()?)?;
-    writeln!(file, "{}\t{}", now(), text.replace(['\n', '\r'], " "))?;
-    Ok(())
-}
-
-/// Lines from the last `days` days, oldest first.
-pub fn recent_history(days: u32) -> Result<Vec<String>> {
-    let path = history_path()?;
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error).context("read history"),
-    };
-    let cutoff = now().saturating_sub(days.max(1) as u64 * 86_400);
-    Ok(text
-        .lines()
-        .filter_map(|line| {
-            let (epoch, body) = line.split_once('\t')?;
-            let epoch: u64 = epoch.parse().ok()?;
-            (epoch >= cutoff).then(|| format!("{}  {body}", stamp(epoch)))
-        })
-        .collect())
-}
-
-/// Drop entries older than `days`. Called after each append so the file cannot
-/// grow without bound.
-pub fn prune_history(days: u32) -> Result<()> {
-    let path = history_path()?;
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Ok(());
-    };
-    let cutoff = now().saturating_sub(days.max(1) as u64 * 86_400);
-    let kept: Vec<&str> = text
-        .lines()
-        .filter(|line| {
-            line.split_once('\t')
-                .and_then(|(epoch, _)| epoch.parse::<u64>().ok())
-                .map(|epoch| epoch >= cutoff)
-                .unwrap_or(false)
-        })
-        .collect();
-    if kept.len() != text.lines().count() {
-        std::fs::write(&path, kept.join("\n") + "\n")?;
-    }
-    Ok(())
-}
-
-pub fn clear_history() -> Result<()> {
-    let path = history_path()?;
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).context("remove history"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -170,15 +170,15 @@ try {
 
     if (-not $SkipTests) {
         Write-Host 'running tests'
-        & cargo test -p hippo-voice
+        & cargo test --workspace
         if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
     }
 
     Write-Host "building ($cargoProfile)"
     if ($Dev) {
-        & cargo build -p hippo-voice
+        & cargo build --workspace
     } else {
-        & cargo build -p hippo-voice --release
+        & cargo build --workspace --release
     }
     if ($LASTEXITCODE -ne 0) { throw 'build failed' }
 
@@ -189,7 +189,7 @@ try {
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
     $bin = Join-Path $root "target\$outDir"
-    foreach ($name in @('hippo-voice.exe', 'hippo-voice-daemon.exe')) {
+    foreach ($name in @('hippo-voice.exe', 'hippo-voice-daemon.exe', 'hippo-voice-settings.exe')) {
         $from = Join-Path $bin $name
         if (-not (Test-Path -LiteralPath $from)) { throw "expected $from after the build" }
         Copy-Item -LiteralPath $from -Destination $stage

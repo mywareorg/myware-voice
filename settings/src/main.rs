@@ -1,15 +1,15 @@
-//! The settings window: the one visible surface in an app that is otherwise
-//! invisible.
+//! The visible surface of an otherwise invisible app: settings and history.
 //!
-//! It edits `config.toml` and exits. It never talks to the running daemon, so the
-//! daemon does not need a reload protocol and cannot be wedged by a window; the
-//! next capture simply reads the file it wrote.
+//! It reads `config.toml` and `history.tsv` and writes only the former; it never
+//! talks to the running daemon, so there is no reload protocol to keep in step and
+//! a window cannot wedge a recording. The next capture reads the file it wrote.
 
 use hippo_ui::rows::{settings_divider, settings_row, switch_row};
 use hippo_ui::styles::*;
 use hippo_ui::tokens::{self, AppTheme, Scheme};
 use hippo_voice::capture;
 use hippo_voice::config::{Config, PasteMethod};
+use hippo_voice::history;
 use hippo_voice::model;
 use iced::widget::{button, column, container, pick_list, row, scrollable, text};
 use iced::{Element, Length, Task};
@@ -18,15 +18,22 @@ const SYSTEM_DEFAULT: &str = "System default";
 const CHUNKS: [&str; 4] = ["10 s", "15 s", "20 s", "30 s"];
 
 fn main() -> iced::Result {
-    iced::application("Hippo Voice Settings", Settings::update, Settings::view)
+    iced::application("Hippo Voice", Settings::update, Settings::view)
         .theme(|state: &Settings| state.mode.iced())
         .font(include_bytes!("../assets/bootstrap-icons.ttf").as_slice())
-        .window_size((620.0, 620.0))
+        .window_size((700.0, 640.0))
         .run_with(Settings::boot)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pane {
+    Settings,
+    History,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
+    Pane(Pane),
     Device(String),
     Paste(PasteMethod),
     Theme(AppTheme),
@@ -34,13 +41,19 @@ enum Message {
     ToggleTones,
     ToggleHistory,
     ToggleTrailing,
+    Refresh,
+    Copy(usize),
+    ClearHistory,
     Save,
 }
 
 struct Settings {
     config: Config,
     mode: AppTheme,
+    pane: Pane,
     devices: Vec<String>,
+    entries: Vec<history::Entry>,
+    copied: Option<usize>,
     saved: bool,
     error: Option<String>,
     model_state: String,
@@ -69,11 +82,23 @@ impl Settings {
             Err(error) => format!("missing: {error}"),
         };
 
+        let entries = load_entries(&config);
+        // The tray opens a specific pane; without a window manager there is no
+        // way to pass an argument to an iced app, so the choice comes through
+        // the environment.
+        let pane = match std::env::var("HIPPO_VOICE_START_PANE").as_deref() {
+            Ok("history") => Pane::History,
+            _ => Pane::Settings,
+        };
+
         (
             Self {
                 mode: AppTheme::System,
-                devices,
                 config,
+                pane,
+                devices,
+                entries,
+                copied: None,
                 saved: false,
                 error: None,
                 model_state,
@@ -83,12 +108,13 @@ impl Settings {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
-        // Any edit invalidates the "Saved" note, so it never describes a file that
-        // no longer matches what is on screen.
         if !matches!(message, Message::Save) {
             self.saved = false;
         }
+        self.copied = None;
+
         match message {
+            Message::Pane(pane) => self.pane = pane,
             Message::Device(name) => {
                 self.config.device = (name != SYSTEM_DEFAULT).then_some(name);
             }
@@ -101,8 +127,27 @@ impl Settings {
                     .unwrap_or(self.config.chunk_seconds);
             }
             Message::ToggleTones => self.config.tones = !self.config.tones,
-            Message::ToggleHistory => self.config.history = !self.config.history,
+            Message::ToggleHistory => {
+                self.config.history = !self.config.history;
+                self.entries = load_entries(&self.config);
+            }
             Message::ToggleTrailing => self.config.trailing_space = !self.config.trailing_space,
+            Message::Refresh => self.entries = load_entries(&self.config),
+            Message::Copy(index) => {
+                if let Some(entry) = self.entries.get(index) {
+                    match hippo_voice::inject::copy(&entry.text) {
+                        Ok(()) => self.copied = Some(index),
+                        Err(error) => self.error = Some(format!("could not copy: {error}")),
+                    }
+                }
+            }
+            Message::ClearHistory => match history::clear() {
+                Ok(()) => {
+                    self.entries.clear();
+                    self.error = None;
+                }
+                Err(error) => self.error = Some(error.to_string()),
+            },
             Message::Save => self.save(),
         }
         Task::none()
@@ -137,6 +182,58 @@ impl Settings {
     fn view(&self) -> Element<'_, Message> {
         let scheme = self.mode.scheme();
 
+        let header = row![
+            text("Hippo Voice").size(tokens::TEXT_XL),
+            iced::widget::horizontal_space(),
+            pick_list(AppTheme::ALL.as_slice(), Some(self.mode), Message::Theme)
+                .style(pill_pick(scheme)),
+        ]
+        .spacing(tokens::SPACE_LG)
+        .align_y(iced::Alignment::Center);
+
+        let tabs = row![
+            tab("Settings", Pane::Settings, self.pane, scheme),
+            tab("History", Pane::History, self.pane, scheme),
+        ]
+        .spacing(tokens::SPACE_2XS);
+
+        let body = match self.pane {
+            Pane::Settings => self.settings_pane(scheme),
+            Pane::History => self.history_pane(scheme),
+        };
+
+        let mut page = column![header, tabs, body]
+            .spacing(tokens::SPACE_LG)
+            .width(Length::Fill);
+
+        if let Some(error) = &self.error {
+            page = page.push(
+                text(error.as_str())
+                    .size(tokens::TEXT_SM)
+                    .color(scheme.danger),
+            );
+        }
+        if self.saved {
+            page = page.push(text("Saved").size(tokens::TEXT_SM).color(scheme.green));
+        }
+
+        container(
+            scrollable(
+                container(page)
+                    .padding(tokens::SPACE_2XL)
+                    .width(Length::Fill),
+            )
+            .style(scrollbar_style)
+            .height(Length::Fill),
+        )
+        .style(move |_theme| container::Style {
+            background: Some(scheme.bg.into()),
+            ..container::Style::default()
+        })
+        .into()
+    }
+
+    fn settings_pane(&self, scheme: Scheme) -> Element<'_, Message> {
         let device_value = self
             .config
             .device
@@ -144,14 +241,6 @@ impl Settings {
             .unwrap_or_else(|| SYSTEM_DEFAULT.to_string());
 
         let mut body = column![
-            row![
-                text("Hippo Voice").size(tokens::TEXT_XL),
-                iced::widget::horizontal_space(),
-                pick_list(AppTheme::ALL.as_slice(), Some(self.mode), Message::Theme)
-                    .style(pill_pick(scheme)),
-            ]
-            .spacing(tokens::SPACE_LG)
-            .align_y(iced::Alignment::Center),
             text("Speak, and the transcript lands where you were typing.")
                 .size(tokens::TEXT_SM)
                 .color(scheme.muted),
@@ -212,7 +301,7 @@ impl Settings {
             ),
             switch_row(
                 "Keep history",
-                "Store delivered transcripts on disk, pruned after the retention period",
+                "Store delivered transcripts on disk, so they can be reviewed here",
                 self.config.history,
                 true,
                 Message::ToggleHistory,
@@ -225,22 +314,7 @@ impl Settings {
         .spacing(tokens::SPACE_MD)
         .width(Length::Fill);
 
-        if let Some(error) = &self.error {
-            body = body.push(
-                text(error.clone())
-                    .size(tokens::TEXT_SM)
-                    .color(scheme.danger),
-            );
-        }
-
-        let saved = self
-            .saved
-            .then(|| text("Saved").size(tokens::TEXT_SM).color(scheme.green));
-
         let mut footer = row![iced::widget::horizontal_space()].width(Length::Fill);
-        if let Some(saved) = saved {
-            footer = footer.push(saved).spacing(tokens::SPACE_MD);
-        }
         footer = footer.push(
             button(text("Save").size(16.0))
                 .on_press(Message::Save)
@@ -248,26 +322,97 @@ impl Settings {
                 .height(Length::Fixed(tokens::CONTROL_HEIGHT))
                 .padding([0, 14]),
         );
+        body = body.push(footer);
+        body.into()
+    }
 
-        // The toggle rows carry a constant message, so the state they set has to
-        // be inverted at the call site; this keeps them one shape.
-        let page = column![body, footer.spacing(tokens::SPACE_MD)]
-            .spacing(tokens::SPACE_2XL)
-            .width(Length::Fill);
+    fn history_pane(&self, scheme: Scheme) -> Element<'_, Message> {
+        if !self.config.history {
+            return column![
+                text("History is off.")
+                    .size(tokens::TEXT_MD)
+                    .color(scheme.text),
+                text(
+                    "Turn on \u{201c}Keep history\u{201d} in Settings and every delivered \
+                     transcript is stored on this machine so it can be reviewed here. \
+                     Nothing is sent anywhere."
+                )
+                .size(tokens::TEXT_SM)
+                .color(scheme.muted),
+                button(text("Open settings").size(16.0))
+                    .on_press(Message::Pane(Pane::Settings))
+                    .style(pill_button_secondary)
+                    .height(Length::Fixed(tokens::CONTROL_HEIGHT))
+                    .padding([0, 14]),
+            ]
+            .spacing(tokens::SPACE_LG)
+            .into();
+        }
 
-        container(
-            scrollable(
-                container(page)
-                    .padding(tokens::SPACE_2XL)
-                    .width(Length::Fill),
-            )
-            .style(scrollbar_style)
-            .height(Length::Fill),
-        )
-        .style(move |_theme| container::Style {
-            background: Some(scheme.bg.into()),
-            ..container::Style::default()
-        })
+        let mut list = column![].spacing(tokens::SPACE_SM).width(Length::Fill);
+        if self.entries.is_empty() {
+            list = list.push(
+                text("Nothing dictated yet, or everything is older than the retention window.")
+                    .size(tokens::TEXT_SM)
+                    .color(scheme.muted),
+            );
+        }
+        for (index, entry) in self.entries.iter().enumerate().rev() {
+            let copied = self.copied == Some(index);
+            list = list.push(
+                container(
+                    row![
+                        column![
+                            text(hippo_voice::log::stamp(entry.epoch))
+                                .size(tokens::TEXT_2XS)
+                                .color(scheme.muted),
+                            text(entry.text.as_str()).size(tokens::TEXT_SM),
+                        ]
+                        .spacing(2)
+                        .width(Length::Fill),
+                        button(text(if copied { "Copied" } else { "Copy" }).size(tokens::TEXT_SM))
+                            .on_press(Message::Copy(index))
+                            .style(pill_button_secondary)
+                            .height(Length::Fixed(tokens::CONTROL_HEIGHT))
+                            .padding([0, 12]),
+                    ]
+                    .spacing(tokens::SPACE_LG)
+                    .align_y(iced::Alignment::Center),
+                )
+                .width(Length::Fill)
+                .padding([6, 8])
+                .style(move |_theme| container::Style {
+                    background: Some(scheme.panel_bg.into()),
+                    border: island_border(&scheme),
+                    ..container::Style::default()
+                }),
+            );
+        }
+
+        column![
+            row![
+                text(format!("{} entries", self.entries.len()))
+                    .size(tokens::TEXT_XS)
+                    .color(scheme.muted),
+                iced::widget::horizontal_space(),
+                button(text("Refresh").size(16.0))
+                    .on_press(Message::Refresh)
+                    .style(pill_button_secondary)
+                    .height(Length::Fixed(tokens::CONTROL_HEIGHT))
+                    .padding([0, 12]),
+                button(text("Clear history").size(16.0))
+                    .on_press(Message::ClearHistory)
+                    .style(color_button(scheme.danger, scheme.on_accent))
+                    .height(Length::Fixed(tokens::CONTROL_HEIGHT))
+                    .padding([0, 12]),
+            ]
+            .spacing(tokens::SPACE_SM)
+            .align_y(iced::Alignment::Center)
+            .width(Length::Fill),
+            list,
+        ]
+        .spacing(tokens::SPACE_MD)
+        .width(Length::Fill)
         .into()
     }
 }
@@ -278,6 +423,22 @@ fn chunk_label(seconds: f32) -> &'static str {
         .into_iter()
         .find(|label| label.trim_end_matches(" s").parse::<f32>() == Ok(seconds))
         .unwrap_or("20 s")
+}
+
+fn load_entries(config: &Config) -> Vec<history::Entry> {
+    if !config.history {
+        return Vec::new();
+    }
+    history::recent(config.history_days).unwrap_or_default()
+}
+
+fn tab<'a>(label: &'a str, pane: Pane, current: Pane, scheme: Scheme) -> Element<'a, Message> {
+    button(text(label).size(16.0))
+        .padding([0, 12])
+        .height(Length::Fixed(tokens::CONTROL_HEIGHT))
+        .style(segment_button(scheme, current == pane, false, false))
+        .on_press(Message::Pane(pane))
+        .into()
 }
 
 fn section<'a>(label: &'a str, scheme: Scheme) -> Element<'a, Message> {

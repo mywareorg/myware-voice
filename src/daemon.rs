@@ -415,10 +415,10 @@ impl Daemon {
 
         inject::copy(&text)?;
         if self.config.history {
-            if let Err(error) = log::append_history(text.trim_end()) {
+            if let Err(error) = crate::history::append(text.trim_end()) {
                 note(&format!("history: {error:#}"));
             }
-            let _ = log::prune_history(self.config.history_days);
+            let _ = crate::history::prune(self.config.history_days);
         }
 
         let focus_now = inject::focus();
@@ -544,6 +544,9 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
             "compositor binding".to_string()
         });
     }
+
+    #[cfg(windows)]
+    crate::tray::spawn(events_tx.clone())?;
 
     #[cfg(windows)]
     {

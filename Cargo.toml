@@ -1,8 +1,5 @@
-# The settings window lives in settings/ but is not a workspace member: it depends
-# on hippo-ui by relative path, which does not exist in a clean clone or on CI.
-# Build it with `cargo build --manifest-path settings/Cargo.toml`.
 [workspace]
-exclude = ["settings"]
+members = ["settings"]
 resolver = "2"
 
 [package]
@@ -44,7 +41,9 @@ enigo = "0.2"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Media_Audio",
+    "Win32_System_LibraryLoader",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 
