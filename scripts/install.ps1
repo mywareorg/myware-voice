@@ -20,17 +20,6 @@ $ErrorActionPreference = 'Stop'
 if (-not $env:LOCALAPPDATA) { throw 'LOCALAPPDATA is not set; this is not a normal Windows session' }
 
 $target = Join-Path $env:LOCALAPPDATA 'Programs\hippo-voice'
-$files = @(
-    'hippo-voice.exe',
-    'hippo-voice-daemon.exe',
-    'sherpa-onnx-c-api.dll',
-    'onnxruntime.dll',
-    'onnxruntime_providers_shared.dll',
-    'uninstall.ps1',
-    'README.md',
-    'LICENSE',
-    'models.lock'
-)
 
 foreach ($required in @('hippo-voice.exe', 'hippo-voice-daemon.exe', 'sherpa-onnx-c-api.dll', 'onnxruntime.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $Source $required))) {
@@ -39,12 +28,10 @@ foreach ($required in @('hippo-voice.exe', 'hippo-voice-daemon.exe', 'sherpa-onn
 }
 
 New-Item -ItemType Directory -Force -Path $target | Out-Null
-foreach ($file in $files) {
-    $from = Join-Path $Source $file
-    if (Test-Path -LiteralPath $from) {
-        Copy-Item -LiteralPath $from -Destination (Join-Path $target $file) -Force
-    }
-}
+# Everything in the release folder: both executables, the sherpa DLLs, the staged
+# VC runtime, the docs and uninstall.ps1.
+Get-ChildItem -LiteralPath $Source -File |
+    ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $target -Force }
 Write-Host "installed to $target"
 
 if (-not $NoPath) {

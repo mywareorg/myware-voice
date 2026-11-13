@@ -152,9 +152,10 @@ Or build the release folder in one command from a checkout:
 .\scripts\build-windows.ps1
 ```
 
-It checks the toolchain, fetches the runtime if absent, runs the tests, builds
-both executables, and writes `dist\hippo-voice-<version>-win-x64` plus a zip of
-it. `-SkipTests`, `-Dev`, `-NoZip` and `-WithModel` are the useful switches; the
+It enters the Visual Studio developer environment when `link.exe` is not already
+on `PATH`, fetches the runtime if absent, runs the tests, builds both executables,
+stages the Visual C++ runtime so a clean machine can start the exe, and writes
+`dist\hippo-voice-<version>-win-x64` plus a zip of it. `-SkipTests`, `-Dev`, `-NoZip` and `-WithModel` are the useful switches; the
 640 MB model is not bundled unless you ask.
 
 **Status: compiles and type-checks for `x86_64-pc-windows-msvc`, has not been

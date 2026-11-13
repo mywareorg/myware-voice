@@ -1,9 +1,10 @@
 #!/usr/bin/env pwsh
 # Build hippo-voice on Windows and stage a release folder.
 #
-# One command: checks the toolchain, fetches the native runtime if it is missing,
-# runs the tests, builds both executables, and stages exactly the files a user
-# needs into dist\hippo-voice-<version>-win-x64, zipped.
+# One command: finds the MSVC toolchain (entering the Visual Studio developer
+# environment when link.exe is not already on PATH), fetches the native runtime if
+# it is missing, runs the tests, builds both executables, and stages exactly the
+# files a user needs into dist\hippo-voice-<version>-win-x64, zipped.
 #
 # The speech model is NOT bundled by default - it is 640 MB and downloaded once by
 # the user. Pass -WithModel to fetch it into the checkout for offline testing.
@@ -23,6 +24,107 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# --- Visual Studio environment ------------------------------------------------
+#
+# Rust's MSVC target needs link.exe. It is only on PATH inside a Developer
+# PowerShell, so a plain terminal fails with "linker `link.exe` not found" long
+# after the build starts. This imports the environment instead of asking the user
+# to know about Developer PowerShell.
+
+function Find-VsInstallPath {
+    $base = ${env:ProgramFiles(x86)}
+    if (-not $base) { $base = 'C:\Program Files (x86)' }
+    $vswhere = Join-Path $base 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path -LiteralPath $vswhere)) { return $null }
+
+    $path = & $vswhere -latest -products * `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -property installationPath
+    if (-not $path) { return $null }
+    return $path.Trim()
+}
+
+function Enter-DevEnvironment {
+    param([Parameter(Mandatory = $true)][string]$VsPath)
+
+    $cmd = Join-Path $VsPath 'Common7\Tools\VsDevCmd.bat'
+    if (-not (Test-Path -LiteralPath $cmd)) {
+        throw "VsDevCmd.bat was not found under $VsPath"
+    }
+    Write-Host 'entering the Visual Studio developer environment'
+
+    # cmd.exe is started through Start-Process because the command line needs a
+    # path with spaces, a nested call and a captured environment, and hand-built
+    # quoting for `cmd /c` silently loses its final quote. Both streams go to
+    # files: in Windows PowerShell 5.1 a native command's stderr becomes an
+    # ErrorRecord as soon as it joins the pipeline, and with
+    # $ErrorActionPreference = 'Stop' that aborts the script even on success.
+    $stdoutFile = [System.IO.Path]::GetTempFileName()
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+    $inner = '""{0}" -arch=x64 -host_arch=x64 && set"' -f $cmd
+
+    $process = Start-Process -FilePath 'cmd.exe' `
+        -ArgumentList @('/c', $inner) `
+        -NoNewWindow -Wait -PassThru `
+        -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+    $code = $process.ExitCode
+
+    $lines = @()
+    if (Test-Path -LiteralPath $stdoutFile) { $lines = @(Get-Content -Path $stdoutFile) }
+    $errors = @()
+    if (Test-Path -LiteralPath $stderrFile) { $errors = @(Get-Content -Path $stderrFile) }
+    Remove-Item -LiteralPath $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+
+    if ($code -ne 0) {
+        $why = @(@($errors) + @($lines) | Where-Object { $_ -and "$_".Trim() } |
+            Select-Object -First 20) -join ' / '
+        throw "VsDevCmd.bat failed with exit code $code. Output: $why"
+    }
+
+    $imported = 0
+    foreach ($line in $lines) {
+        if ($line -match '^([^=]+)=(.*)$') {
+            [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+            $imported++
+        }
+    }
+    if ($imported -eq 0) {
+        throw 'VsDevCmd.bat produced no environment variables; the developer environment was not applied.'
+    }
+}
+
+# Rust links the dynamic C runtime, so a clean machine without the Visual C++
+# redistributable cannot start the exe. Stage the three DLLs that matter.
+function Copy-VcRuntime {
+    param([string]$VsPath, [string]$Destination)
+
+    if (-not $VsPath) { return $false }
+    $redist = Join-Path $VsPath 'VC\Redist\MSVC'
+    if (-not (Test-Path -LiteralPath $redist)) {
+        Write-Warning 'no VC redistributable found; the app will need the Visual C++ runtime installed'
+        return $false
+    }
+
+    $crt = Get-ChildItem -LiteralPath $redist -Recurse -Directory -Filter 'Microsoft.VC*.CRT' `
+        -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match '\\x64\\' } |
+        Select-Object -First 1 -ExpandProperty FullName
+    if (-not $crt) {
+        Write-Warning 'no x64 VC redistributable found; the app will need the Visual C++ runtime installed'
+        return $false
+    }
+
+    $copied = 0
+    foreach ($dll in @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll')) {
+        $from = Join-Path $crt $dll
+        if (Test-Path -LiteralPath $from) {
+            Copy-Item -LiteralPath $from -Destination $Destination
+            $copied++
+        }
+    }
+    return ($copied -gt 0)
+}
+
 $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
 try {
@@ -36,13 +138,16 @@ try {
     if ($hostTarget -notmatch 'windows') {
         throw "this script builds a Windows target, but the host is $hostTarget"
     }
-    if ($hostTarget -notmatch 'msvc$') {
-        Write-Warning "host target is $hostTarget; the release artifact is built for *-pc-windows-msvc"
+
+    $vsPath = Find-VsInstallPath
+    if (-not (Get-Command link.exe -ErrorAction SilentlyContinue)) {
+        if (-not $vsPath) {
+            throw 'link.exe is not on PATH and no Visual Studio C++ build tools were found. Install "Build Tools for Visual Studio" with the Desktop development with C++ workload, then rerun this script.'
+        }
+        Enter-DevEnvironment -VsPath $vsPath
     }
     if (-not (Get-Command link.exe -ErrorAction SilentlyContinue)) {
-        Write-Warning 'link.exe is not on PATH. If the build fails with "linker `link.exe` not found",'
-        Write-Warning 'install Visual Studio Build Tools with the Desktop development with C++ workload,'
-        Write-Warning 'or run this script from a Developer PowerShell.'
+        throw 'link.exe is still not on PATH after entering the Visual Studio environment. Add the "Desktop development with C++" workload.'
     }
 
     # --- native runtime ----------------------------------------------------
@@ -99,6 +204,9 @@ try {
     }
     foreach ($name in @('install.ps1', 'uninstall.ps1')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $stage
+    }
+    if (Copy-VcRuntime -VsPath $vsPath -Destination $stage) {
+        Write-Host 'staged the Visual C++ runtime'
     }
 
     if (-not $NoZip) {
