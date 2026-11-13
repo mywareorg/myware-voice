@@ -83,6 +83,11 @@ pub struct Config {
     /// autocomplete key in most editors stop reaching their applications. Change
     /// it here if that matters more than the shorter chord.
     pub hotkey: String,
+    /// The chord that starts and stops streaming dictation on Windows.
+    pub stream_hotkey: String,
+    /// Target seconds per incrementally transcribed phrase. Streaming waits for
+    /// a pause near this length before committing, so a word is not cut in two.
+    pub stream_seconds: f32,
     /// Keep delivered transcripts at rest. Off by default: the app's premise is
     /// that transcripts stay where the user puts them.
     pub history: bool,
@@ -101,6 +106,8 @@ impl Default for Config {
             max_seconds: 300.0,
             tones: true,
             hotkey: "ctrl+space".to_string(),
+            stream_hotkey: "ctrl+shift+space".to_string(),
+            stream_seconds: 3.0,
             history: false,
             history_days: 30,
         }

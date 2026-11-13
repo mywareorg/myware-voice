@@ -157,6 +157,23 @@ impl Recorder {
         let (interleaved, rate, channels) = self.finish();
         (crate::audio::to_mono(&interleaved, channels), rate)
     }
+
+    /// A copy of everything captured so far, reduced to mono, without stopping.
+    ///
+    /// Streaming commits phrases while the device keeps running, so it cannot
+    /// use `finish_mono`. The copy is deliberate: resampling and decoding happen
+    /// on the daemon thread while the audio callback keeps appending.
+    pub fn snapshot_mono(&self) -> (Vec<f32>, u32) {
+        let interleaved = self
+            .buffer
+            .lock()
+            .map(|samples| samples.clone())
+            .unwrap_or_default();
+        (
+            crate::audio::to_mono(&interleaved, self.channels),
+            self.rate,
+        )
+    }
 }
 
 /// Turn a device error into something the user can act on.

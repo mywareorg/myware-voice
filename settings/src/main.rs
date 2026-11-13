@@ -72,6 +72,7 @@ enum Message {
     Device(String),
     Paste(PasteMethod),
     Hotkey(String),
+    StreamHotkey(String),
     Theme(AppTheme),
     Chunk(&'static str),
     ToggleTones,
@@ -96,6 +97,8 @@ struct Settings {
     model_state: String,
     hotkey_draft: String,
     hotkey_error: Option<String>,
+    stream_draft: String,
+    stream_error: Option<String>,
 }
 
 impl Settings {
@@ -133,12 +136,17 @@ impl Settings {
         let hotkey_error = Chord::parse(&config.hotkey)
             .err()
             .map(|error| error.to_string());
+        let stream_error = Chord::parse(&config.stream_hotkey)
+            .err()
+            .map(|error| error.to_string());
 
         (
             Self {
                 mode: AppTheme::System,
                 hotkey_draft: config.hotkey.clone(),
                 hotkey_error,
+                stream_draft: config.stream_hotkey.clone(),
+                stream_error,
                 config,
                 pane,
                 devices,
@@ -185,6 +193,16 @@ impl Settings {
                     Err(error) => self.hotkey_error = Some(error.to_string()),
                 }
             }
+            Message::StreamHotkey(text) => {
+                self.stream_draft = text.clone();
+                match Chord::parse(&text) {
+                    Ok(_) => {
+                        self.config.stream_hotkey = text;
+                        self.stream_error = None;
+                    }
+                    Err(error) => self.stream_error = Some(error.to_string()),
+                }
+            }
             Message::Theme(mode) => self.mode = mode,
             Message::Chunk(label) => {
                 self.config.chunk_seconds = label
@@ -227,6 +245,10 @@ impl Settings {
     fn save(&mut self) {
         if let Some(error) = &self.hotkey_error {
             self.error = Some(format!("Hotkey: {error}"));
+            return;
+        }
+        if let Some(error) = &self.stream_error {
+            self.error = Some(format!("Streaming hotkey: {error}"));
             return;
         }
         let path = match Config::path() {
@@ -365,6 +387,24 @@ impl Settings {
             })
             .size(tokens::TEXT_XS)
             .color(if self.hotkey_error.is_some() {
+                scheme.danger
+            } else {
+                scheme.muted
+            }),
+            settings_row(
+                "Streaming hotkey",
+                text_input("ctrl+shift+space", self.stream_draft.as_str())
+                    .on_input(Message::StreamHotkey)
+                    .style(pill_input)
+                    .width(Length::Fixed(180.0)),
+                scheme,
+            ),
+            text(match &self.stream_error {
+                Some(error) => format!("Not a usable chord: {error}"),
+                None => "Streams phrases while you speak instead of waiting for the stop press.".to_string(),
+            })
+            .size(tokens::TEXT_XS)
+            .color(if self.stream_error.is_some() {
                 scheme.danger
             } else {
                 scheme.muted

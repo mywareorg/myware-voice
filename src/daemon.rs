@@ -87,6 +87,9 @@ pub struct Status {
     /// RMS of the live capture, for the listening popup. Zero when idle.
     #[serde(default)]
     pub level: f32,
+    /// Whether the current capture commits phrases while the user speaks.
+    #[serde(default)]
+    pub streaming: bool,
 }
 
 impl Default for Status {
@@ -99,6 +102,7 @@ impl Default for Status {
             last_text: None,
             hotkey: None,
             level: 0.0,
+            streaming: false,
         }
     }
 }
@@ -106,12 +110,21 @@ impl Default for Status {
 #[derive(Debug)]
 pub enum Event {
     Toggle,
+    /// Start or stop dictation that commits phrases while the user speaks.
+    ToggleStream,
     /// Stop the daemon. Needed by the uninstaller and by anyone asking why a
     /// process is still running.
     Quit,
     Decoded {
         generation: u64,
         text: String,
+    },
+    /// One incrementally decoded phrase. `final_chunk` ends the session after
+    /// its text is delivered.
+    Streamed {
+        generation: u64,
+        text: String,
+        final_chunk: bool,
     },
     Failed(String),
 }
@@ -260,6 +273,14 @@ enum DecodeJob {
         generation: u64,
         chunk_seconds: f32,
     },
+    /// Decode one phrase without ending the session. The samples are already
+    /// resampled and normalised, and `final_chunk` asks for the session to end
+    /// after delivery.
+    Stream {
+        samples: Vec<f32>,
+        generation: u64,
+        final_chunk: bool,
+    },
     /// Drop the recognizer. ONNX Runtime does not return a long decode's arena
     /// to the OS, so holding the model forever is the expensive option.
     Unload,
@@ -276,18 +297,37 @@ struct Daemon {
     started: Instant,
     focus: Option<Focus>,
     fake_delivery: bool,
+    /// Streaming dictation: whether the current capture commits phrases, how
+    /// many raw mono samples have been committed, and the window that must stay
+    /// focused for the whole session.
+    streaming: bool,
+    stream_committed: usize,
+    stream_focus: Option<Focus>,
+    stream_text: String,
 }
 
 impl Daemon {
     fn handle(&mut self, event: Event) -> Result<()> {
         match event {
             Event::Toggle => self.toggle(),
+            Event::ToggleStream => self.toggle_stream(),
             // Handled by the run loop, which breaks out of it.
             Event::Quit => Ok(()),
             Event::Decoded { generation, text } => {
                 let outcome = self.delivered(generation, text);
                 // A failed copy or paste must not leave the daemon stuck in
                 // Decoding: the next press would be read as "cancel", not "record".
+                if outcome.is_err() {
+                    self.set(Phase::Idle);
+                }
+                outcome
+            }
+            Event::Streamed {
+                generation,
+                text,
+                final_chunk,
+            } => {
+                let outcome = self.streamed(generation, text, final_chunk);
                 if outcome.is_err() {
                     self.set(Phase::Idle);
                 }
@@ -303,16 +343,50 @@ impl Daemon {
     }
 
     fn toggle(&mut self) -> Result<()> {
+        if self.streaming {
+            return self.stop_streaming();
+        }
         match self.status.lock().map(|s| s.phase).unwrap_or(Phase::Idle) {
             Phase::Recording => self.stop_recording_and_decode(),
             // A second press during decode means "I want to talk", not "wait".
             // Starting a capture bumps the generation, which abandons the decode.
-            Phase::Decoding => self.start_recording(),
-            Phase::Idle => self.start_recording(),
+            Phase::Decoding => self.start_recording(false),
+            Phase::Idle => self.start_recording(false),
         }
     }
 
-    fn start_recording(&mut self) -> Result<()> {
+    /// Start streaming, or finish the session if one is already running.
+    ///
+    /// Pressing it during a normal recording adopts that capture: everything
+    /// already spoken is treated as committed and is not pasted, so the switch
+    /// does not dump a buffer of old text into the window.
+    fn toggle_stream(&mut self) -> Result<()> {
+        if self.streaming {
+            return self.stop_streaming();
+        }
+
+        let phase = self.status.lock().map(|s| s.phase).unwrap_or(Phase::Idle);
+        if phase == Phase::Recording {
+            let committed = self
+                .recorder
+                .as_ref()
+                .map(|recorder| recorder.snapshot_mono().0.len())
+                .unwrap_or(0);
+            self.streaming = true;
+            self.stream_committed = committed;
+            self.stream_focus = inject::focus();
+            self.stream_text.clear();
+            if let Ok(mut status) = self.status.lock() {
+                status.streaming = true;
+            }
+            log::write("streaming adopted the current capture");
+            return Ok(());
+        }
+
+        self.start_recording(true)
+    }
+
+    fn start_recording(&mut self, streaming: bool) -> Result<()> {
         let recorder = Recorder::start(self.config.device.as_deref())?;
         let device = recorder.device().to_string();
         // Bumping the generation is what cancels a decode that is still running.
@@ -321,6 +395,10 @@ impl Daemon {
         self.last_activity = Instant::now();
         self.started = Instant::now();
         self.recorder = Some(recorder);
+        self.streaming = streaming;
+        self.stream_committed = 0;
+        self.stream_focus = if streaming { inject::focus() } else { None };
+        self.stream_text.clear();
         self.set(Phase::Recording);
         if let Ok(mut status) = self.status.lock() {
             status.device = device.clone();
@@ -331,7 +409,10 @@ impl Daemon {
         if self.config.tones {
             tone::play(Cue::Start);
         }
-        log::write(&format!("recording on {device}"));
+        log::write(&format!(
+            "recording on {device}{}",
+            if streaming { " (streaming)" } else { "" }
+        ));
         Ok(())
     }
 
@@ -344,7 +425,6 @@ impl Daemon {
             self.set(Phase::Idle);
             return Ok(());
         };
-
         // The window that should receive the paste, recorded before the decode
         // starts rather than after it.
         self.focus = inject::focus();
@@ -386,6 +466,212 @@ impl Daemon {
             })
             .map_err(|_| anyhow!("decoder thread is gone"))?;
         Ok(())
+    }
+
+    /// Commit a phrase while the user keeps talking.
+    ///
+    /// The capture is read as a snapshot, resampled, and sliced from the last
+    /// committed sample. A commit waits for a pause near `stream_seconds` so a
+    /// word is not cut in half; a long uninterrupted sentence forces one at
+    /// 2.5x that length. Samples are marked committed before the decode runs,
+    /// so a slow decode cannot send the same audio twice.
+    fn stream_tick(&mut self) {
+        if !self.streaming {
+            return;
+        }
+        let phase = self.status.lock().map(|s| s.phase).unwrap_or(Phase::Idle);
+        if phase != Phase::Recording {
+            return;
+        }
+        let Some((mono, rate)) = self
+            .recorder
+            .as_ref()
+            .map(|recorder| recorder.snapshot_mono())
+        else {
+            return;
+        };
+
+        let elapsed = mono.len() as f32 / rate.max(1) as f32;
+        let committed = self.stream_committed as f32 / rate.max(1) as f32;
+        let target = self.config.stream_seconds.max(0.5);
+        if elapsed - committed < target {
+            return;
+        }
+        if self.stream_committed >= mono.len() {
+            return;
+        }
+
+        let raw = &mono[self.stream_committed..];
+        let Ok(mut chunk) = audio::resample(raw, rate, audio::SAMPLE_RATE) else {
+            return;
+        };
+        if chunk.len() as f32 / (audio::SAMPLE_RATE as f32) < 0.25 {
+            return;
+        }
+        let forced = elapsed - committed >= target * 2.5;
+        if !forced && !silent_tail(raw, rate) {
+            return;
+        }
+
+        audio::normalize_loudness(&mut chunk);
+        self.stream_committed = mono.len();
+        self.last_activity = Instant::now();
+        if self
+            .jobs
+            .send(DecodeJob::Stream {
+                samples: chunk,
+                generation: self.generation.load(Ordering::SeqCst),
+                final_chunk: false,
+            })
+            .is_err()
+        {
+            note("streaming: decoder thread is gone");
+            self.set(Phase::Idle);
+        }
+    }
+
+    /// Stop capturing and decode whatever has not been committed yet.
+    fn stop_streaming(&mut self) -> Result<()> {
+        let Some(recorder) = self.recorder.take() else {
+            self.set(Phase::Idle);
+            return Ok(());
+        };
+
+        self.focus = self.stream_focus.clone();
+        let failure = recorder.failure();
+        let (mono, rate) = recorder.finish_mono();
+
+        // A new generation revokes partial decodes that are still in flight;
+        // only the final chunk is allowed to deliver after this point.
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+
+        if let Some(reason) = failure {
+            note(&format!("audio device failed mid-capture ({reason})"));
+        }
+
+        if self.stream_committed >= mono.len() {
+            self.end_stream();
+            return Ok(());
+        }
+        let raw = &mono[self.stream_committed..];
+        if raw.len() as f32 / (rate.max(1) as f32) < 0.25 {
+            self.end_stream();
+            return Ok(());
+        }
+        let mut tail = match audio::resample(raw, rate, audio::SAMPLE_RATE) {
+            Ok(tail) => tail,
+            Err(error) => {
+                self.set(Phase::Idle);
+                return Err(error);
+            }
+        };
+        audio::normalize_loudness(&mut tail);
+
+        if let Ok(mut status) = self.status.lock() {
+            status.phase = Phase::Decoding;
+            status.seconds = 0.0;
+            status.level = 0.0;
+            status.generation = generation;
+        }
+        if self
+            .jobs
+            .send(DecodeJob::Stream {
+                samples: tail,
+                generation,
+                final_chunk: true,
+            })
+            .is_err()
+        {
+            self.set(Phase::Idle);
+            anyhow::bail!("decoder thread is gone");
+        }
+        Ok(())
+    }
+
+    fn streamed(&mut self, generation: u64, text: String, final_chunk: bool) -> Result<()> {
+        if !self.streaming || generation != self.generation.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let text = text.trim();
+        if text.is_empty() {
+            if final_chunk {
+                self.end_stream();
+            }
+            return Ok(());
+        }
+
+        let now = inject::focus();
+        if !same_focus(self.stream_focus.as_ref(), now.as_ref()) {
+            inject::notify(
+                "Streaming stopped",
+                "Focus changed; the rest was not pasted",
+            );
+            return Err(anyhow!("focus changed; streaming stopped"));
+        }
+
+        // Every chunk gets a separating space except the last one. The user
+        // chose `trailing_space` for single dictations; chunk boundaries need a
+        // space regardless or words run together.
+        let payload = if final_chunk {
+            text.to_string()
+        } else {
+            format!("{text} ")
+        };
+
+        self.stream_text.push_str(text);
+        self.stream_text.push(' ');
+
+        if self.fake_delivery {
+            log::write("streamed (fake delivery)");
+            if final_chunk {
+                self.end_stream();
+            }
+            return Ok(());
+        }
+
+        inject::copy(&payload)?;
+        match inject::paste(self.config.paste, now.as_ref()) {
+            Ok(crate::config::PasteMethod::None) => {
+                inject::notify("Streaming stopped", "No paste tool available");
+                return Err(anyhow!("no paste tool"));
+            }
+            Ok(_) => {}
+            Err(error) => return Err(error).context("stream paste"),
+        }
+        self.last_activity = Instant::now();
+        if let Ok(mut status) = self.status.lock() {
+            status.last_text = Some(text.to_string());
+        }
+        log::write(&format!("streamed {} chars", text.chars().count()));
+        if final_chunk {
+            self.end_stream();
+        }
+        Ok(())
+    }
+
+    /// Flush the session's history, play the stop cue and leave Recording.
+    fn end_stream(&mut self) {
+        self.finish_stream_history();
+        if self.config.tones {
+            tone::play(Cue::Done);
+        }
+        self.set(Phase::Idle);
+    }
+
+    /// Store the whole streamed session, not one row per phrase.
+    fn finish_stream_history(&mut self) {
+        if !self.config.history {
+            return;
+        }
+        let text = self.stream_text.trim();
+        if text.is_empty() {
+            return;
+        }
+        if let Err(error) = crate::history::append(text) {
+            note(&format!("history: {error:#}"));
+        }
+        let _ = crate::history::prune(self.config.history_days);
+        self.stream_text.clear();
     }
 
     fn delivered(&mut self, generation: u64, text: String) -> Result<()> {
@@ -469,7 +755,12 @@ impl Daemon {
             == Phase::Recording;
         if recording && self.started.elapsed().as_secs_f32() > limit {
             note(&format!("capture reached the {limit:.0}s limit; stopping"));
-            if let Err(error) = self.stop_recording_and_decode() {
+            let outcome = if self.streaming {
+                self.stop_streaming()
+            } else {
+                self.stop_recording_and_decode()
+            };
+            if let Err(error) = outcome {
                 note(&format!("stop at the limit failed: {error:#}"));
                 self.set(Phase::Idle);
             }
@@ -492,7 +783,10 @@ impl Daemon {
         }
     }
 
-    fn set(&self, phase: Phase) {
+    fn set(&mut self, phase: Phase) {
+        if phase == Phase::Idle {
+            self.streaming = false;
+        }
         if let Ok(mut status) = self.status.lock() {
             status.phase = phase;
             status.generation = self.generation.load(Ordering::SeqCst);
@@ -502,6 +796,7 @@ impl Daemon {
                 0.0
             };
             status.level = 0.0;
+            status.streaming = self.streaming;
         }
     }
 
@@ -532,6 +827,21 @@ fn same_focus(captured: Option<&Focus>, now: Option<&Focus>) -> bool {
         None => true,
         Some(captured) => now.is_some_and(|now| captured == now),
     }
+}
+
+/// Whether the end of a capture is quiet enough to cut a phrase there.
+///
+/// The threshold is on raw device levels: speech sits well above it, room noise
+/// below. A false negative only delays the commit, because `stream_tick` forces
+/// one after a while.
+fn silent_tail(samples: &[f32], rate: u32) -> bool {
+    let window = (rate as f32 * 0.25) as usize;
+    if samples.len() < window {
+        return false;
+    }
+    let tail = &samples[samples.len() - window..];
+    let energy: f32 = tail.iter().map(|sample| sample * sample).sum::<f32>() / window as f32;
+    energy.sqrt() < 0.008
 }
 
 /// Load the configuration and the model location, then run. This is what both
@@ -589,7 +899,14 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
             note(&format!("hotkey: {error}; falling back to ctrl+space"));
             crate::chord::Chord::parse("ctrl+space").expect("the default chord is valid")
         });
-        crate::hotkey::spawn(events_tx.clone(), chord, Arc::clone(&status))?;
+        let stream = crate::chord::Chord::parse(&config.stream_hotkey).unwrap_or_else(|error| {
+            note(&format!(
+                "stream hotkey: {error}; falling back to ctrl+shift+space"
+            ));
+            crate::chord::Chord::parse("ctrl+shift+space")
+                .expect("the default streaming chord is valid")
+        });
+        crate::hotkey::spawn(events_tx.clone(), chord, stream, Arc::clone(&status))?;
     }
 
     let decoder_events = events_tx.clone();
@@ -621,6 +938,10 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
         started: Instant::now(),
         focus: None,
         fake_delivery: fake_delivery(),
+        streaming: false,
+        stream_committed: 0,
+        stream_focus: None,
+        stream_text: String::new(),
     };
 
     loop {
@@ -638,6 +959,7 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
             }
             Err(RecvTimeoutError::Timeout) => {
                 daemon.refresh_seconds();
+                daemon.stream_tick();
                 daemon.unload_if_idle();
                 daemon.enforce_max_capture();
             }
@@ -773,6 +1095,50 @@ fn decoder_loop(
                         Err(error) => {
                             let _ = events.send(Event::Failed(format!("{error:#}")));
                         }
+                    }
+                }
+            }
+            DecodeJob::Stream {
+                samples,
+                generation: job_generation,
+                final_chunk,
+            } => {
+                if let Some(canned) = &fake {
+                    thread::sleep(Duration::from_millis(20));
+                    let _ = events.send(Event::Streamed {
+                        generation: job_generation,
+                        text: canned.clone(),
+                        final_chunk,
+                    });
+                    continue;
+                }
+                if generation.load(Ordering::SeqCst) != job_generation {
+                    continue;
+                }
+                if loaded.is_none() {
+                    match load(&model_dir, threads) {
+                        Ok(pair) => loaded = Some(pair),
+                        Err(error) => {
+                            let _ = events.send(Event::Failed(format!("{error:#}")));
+                            continue;
+                        }
+                    }
+                }
+                let Some(recognizer) = loaded.as_ref() else {
+                    continue;
+                };
+                match recognizer.transcribe(&samples) {
+                    Ok(text) => {
+                        if generation.load(Ordering::SeqCst) == job_generation {
+                            let _ = events.send(Event::Streamed {
+                                generation: job_generation,
+                                text,
+                                final_chunk,
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        let _ = events.send(Event::Failed(format!("{error:#}")));
                     }
                 }
             }

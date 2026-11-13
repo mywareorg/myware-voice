@@ -23,13 +23,19 @@ use crate::chord::{Chord, Key};
 use crate::daemon::{Event, Status};
 
 const HOTKEY_ID: i32 = 1;
+const STREAM_HOTKEY_ID: i32 = 2;
 
-/// Register the chord on its own thread and forward each press.
+/// Register the chords on their own thread and forward each press.
 ///
 /// The outcome is written into the shared status either way: a daemon that looks
 /// alive but never fires is the worst failure this app can have, so a taken chord
 /// has to be visible in `hippo-voice status`.
-pub fn spawn(events: Sender<Event>, chord: Chord, status: Arc<Mutex<Status>>) -> Result<()> {
+pub fn spawn(
+    events: Sender<Event>,
+    chord: Chord,
+    stream: Chord,
+    status: Arc<Mutex<Status>>,
+) -> Result<()> {
     std::thread::Builder::new()
         .name("hotkey".into())
         .spawn(move || unsafe {
@@ -37,16 +43,26 @@ pub fn spawn(events: Sender<Event>, chord: Chord, status: Arc<Mutex<Status>>) ->
             let key = virtual_key(chord.key);
             let registered = RegisterHotKey(std::ptr::null_mut(), HOTKEY_ID, modifiers, key) != 0;
 
-            let outcome = if registered {
-                chord.to_string()
-            } else {
-                format!("unavailable: {chord} is taken by another program")
+            let stream_modifiers = modifiers(&stream) | MOD_NOREPEAT;
+            let stream_key = virtual_key(stream.key);
+            let stream_registered = RegisterHotKey(
+                std::ptr::null_mut(),
+                STREAM_HOTKEY_ID,
+                stream_modifiers,
+                stream_key,
+            ) != 0;
+
+            let outcome = match (registered, stream_registered) {
+                (true, true) => format!("{chord} · {stream} streams"),
+                (true, false) => format!("{chord} · {stream} unavailable"),
+                (false, true) => format!("{chord} unavailable · {stream} streams"),
+                (false, false) => format!("unavailable: {chord} and {stream} are taken"),
             };
             crate::log::write(&format!("hotkey: {outcome}"));
             if let Ok(mut view) = status.lock() {
                 view.hotkey = Some(outcome);
             }
-            if !registered {
+            if !registered && !stream_registered {
                 return;
             }
 
@@ -56,9 +72,16 @@ pub fn spawn(events: Sender<Event>, chord: Chord, status: Arc<Mutex<Status>>) ->
                 if result <= 0 {
                     break;
                 }
-                if message.message == WM_HOTKEY && message.wParam == HOTKEY_ID as usize {
-                    if events.send(Event::Toggle).is_err() {
-                        break;
+                if message.message == WM_HOTKEY {
+                    let event = match message.wParam as i32 {
+                        HOTKEY_ID => Some(Event::Toggle),
+                        STREAM_HOTKEY_ID => Some(Event::ToggleStream),
+                        _ => None,
+                    };
+                    if let Some(event) = event {
+                        if events.send(event).is_err() {
+                            break;
+                        }
                     }
                 }
             }

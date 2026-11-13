@@ -44,6 +44,7 @@ const TICK: Duration = Duration::from_millis(100);
 struct Meter {
     levels: [f32; BARS],
     seconds: f32,
+    streaming: bool,
 }
 
 static METER: OnceLock<Mutex<Meter>> = OnceLock::new();
@@ -53,6 +54,7 @@ fn meter() -> &'static Mutex<Meter> {
         Mutex::new(Meter {
             levels: [0.0; BARS],
             seconds: 0.0,
+            streaming: false,
         })
     })
 }
@@ -120,13 +122,14 @@ fn run(status: Arc<Mutex<Status>>) -> Result<()> {
                 DispatchMessageW(&message);
             }
 
-            let (recording, level, seconds) = match status.lock() {
+            let (recording, level, seconds, streaming) = match status.lock() {
                 Ok(status) => (
                     status.phase == Phase::Recording,
                     status.level,
                     status.seconds,
+                    status.streaming,
                 ),
-                Err(_) => (false, 0.0, 0.0),
+                Err(_) => (false, 0.0, 0.0, false),
             };
 
             if recording {
@@ -141,6 +144,7 @@ fn run(status: Arc<Mutex<Status>>) -> Result<()> {
                 if let Ok(mut meter) = meter().lock() {
                     meter.levels = levels;
                     meter.seconds = seconds;
+                    meter.streaming = streaming;
                 }
                 // Paint through WM_PAINT so the class remains a normal window;
                 // drawing from two threads into one HDC is the kind of thing
@@ -216,9 +220,9 @@ unsafe fn paint(window: HWND) {
     FillRect(dc, &rect, background);
     DeleteObject(background);
 
-    let (levels, seconds) = match meter().lock() {
-        Ok(meter) => (meter.levels, meter.seconds),
-        Err(_) => ([0.0; BARS], 0.0),
+    let (levels, seconds, streaming) = match meter().lock() {
+        Ok(meter) => (meter.levels, meter.seconds, meter.streaming),
+        Err(_) => ([0.0; BARS], 0.0, false),
     };
 
     let font = CreateFontW(
@@ -241,7 +245,7 @@ unsafe fn paint(window: HWND) {
     SetBkMode(dc, TRANSPARENT as i32);
     SetTextColor(dc, rgb(240, 240, 244));
 
-    let label = wide("Listening");
+    let label = wide(if streaming { "Streaming" } else { "Listening" });
     TextOutW(dc, 32, 14, label.as_ptr(), label.len() as i32 - 1);
 
     SetTextAlign(dc, TA_RIGHT | TA_TOP);

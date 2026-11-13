@@ -135,6 +135,14 @@ mod tests {
     }
 
     #[test]
+    fn the_streaming_default_adds_shift() {
+        let chord = Chord::parse(&crate::config::Config::default().stream_hotkey).expect("parse");
+        assert!(chord.ctrl && chord.shift);
+        assert!(!chord.alt && !chord.win);
+        assert_eq!(chord.to_string(), "ctrl+shift+space");
+    }
+
+    #[test]
     fn order_and_case_do_not_matter() {
         let a = Chord::parse("Alt+Control+SPACE").expect("parse");
         let b = Chord::parse("ctrl+alt+space").expect("parse");

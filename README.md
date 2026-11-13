@@ -192,6 +192,13 @@ run.** What is wired:
   so the input-method switch on some layouts and editor autocomplete stop
   reaching their applications; `hotkey = "ctrl+alt+space"` in `config.toml`
   trades the shorter chord for that. The settings window has the same field.
+- **Streaming mode** (`ctrl+shift+space`) records continuously and pastes each
+  phrase as it is transcribed, instead of waiting for the stop press. Parakeet
+  is an offline model, so this commits at pauses near `stream_seconds` (3 s by
+  default) rather than word by word; a long unbroken sentence forces a commit at
+  2.5x that. It stops if focus changes, because continuing would paste into the
+  wrong window. `stream_hotkey` and `stream_seconds` are config fields; the
+  chord is editable in settings.
 - The transport is loopback TCP on an ephemeral port with a per-run token in the
   state directory: an open port is not authority to open a microphone.
 - Delivery is `arboard` for the clipboard and `enigo` (`SendInput`) for the chord.
