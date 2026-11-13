@@ -8,7 +8,7 @@
 //! take tens of milliseconds, and that must never sit between the keypress and
 //! the microphone opening.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cue {
@@ -49,13 +49,6 @@ pub fn play(cue: Cue) {
 }
 
 fn play_blocking(cue: Cue) -> Result<(), String> {
-    let Some(player) = super::inject::have("pw-play")
-        .then_some("pw-play")
-        .or_else(|| super::inject::have("paplay").then_some("paplay"))
-    else {
-        return Ok(());
-    };
-
     let path = cue_path(cue)?;
     if !path.is_file() {
         let samples = render(cue.frequency(), cue.milliseconds(), 48_000);
@@ -63,8 +56,50 @@ fn play_blocking(cue: Cue) -> Result<(), String> {
             .map_err(|error| format!("write {}: {error}", path.display()))?;
     }
 
+    #[cfg(windows)]
+    {
+        return play_windows(&path);
+    }
+
+    #[cfg(not(windows))]
+    {
+        play_with_player(&path)
+    }
+}
+
+/// `PlaySoundW` is the whole Windows cue path: no child process to reap, and
+/// `SND_ASYNC` keeps it off the capture thread.
+#[cfg(windows)]
+fn play_windows(path: &Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT};
+
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide.push(0);
+    let played = unsafe {
+        PlaySoundW(
+            wide.as_ptr(),
+            std::ptr::null_mut(),
+            SND_ASYNC | SND_FILENAME | SND_NODEFAULT,
+        )
+    };
+    if played == 0 {
+        return Err(format!("PlaySoundW could not play {}", path.display()));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn play_with_player(path: &Path) -> Result<(), String> {
+    let Some(player) = super::inject::have("pw-play")
+        .then_some("pw-play")
+        .or_else(|| super::inject::have("paplay").then_some("paplay"))
+    else {
+        return Ok(());
+    };
+
     let mut child = std::process::Command::new(player)
-        .arg(&path)
+        .arg(path)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()

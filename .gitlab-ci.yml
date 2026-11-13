@@ -40,6 +40,7 @@ windows-cross:
     # library the app never loads.
     - cp "/tmp/$SHERPA/lib/sherpa-onnx-c-api.dll" "/tmp/$SHERPA/lib/onnxruntime.dll" "/tmp/$SHERPA/lib/onnxruntime_providers_shared.dll" dist/
     - cp README.md LICENSE models.lock dist/
+    - cp scripts/install.ps1 scripts/uninstall.ps1 dist/
     # Print the import table, then fail if the mingw runtime leaked in.
     - x86_64-w64-mingw32-objdump -p dist/hippo-voice.exe | grep 'DLL Name'
     - |

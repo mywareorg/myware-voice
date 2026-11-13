@@ -102,7 +102,13 @@ impl Default for Status {
 #[derive(Debug)]
 pub enum Event {
     Toggle,
-    Decoded { generation: u64, text: String },
+    /// Stop the daemon. Needed by the uninstaller and by anyone asking why a
+    /// process is still running.
+    Quit,
+    Decoded {
+        generation: u64,
+        text: String,
+    },
     Failed(String),
 }
 
@@ -272,6 +278,8 @@ impl Daemon {
     fn handle(&mut self, event: Event) -> Result<()> {
         match event {
             Event::Toggle => self.toggle(),
+            // Handled by the run loop, which breaks out of it.
+            Event::Quit => Ok(()),
             Event::Decoded { generation, text } => {
                 let outcome = self.delivered(generation, text);
                 // A failed copy or paste must not leave the daemon stuck in
@@ -579,6 +587,7 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
 
     loop {
         match events_rx.recv_timeout(TICK) {
+            Ok(Event::Quit) => break,
             Ok(Event::Toggle) => {
                 if let Err(error) = daemon.handle(Event::Toggle) {
                     note(&format!("toggle: {error:#}"));
@@ -646,6 +655,20 @@ fn serve(
     let reply = match request.cmd.as_str() {
         "toggle" => {
             let _ = events.send(Event::Toggle);
+            Reply {
+                ok: true,
+                app: Some(APP.to_string()),
+                protocol: Some(PROTOCOL),
+                phase: None,
+                seconds: None,
+                device: None,
+                text: None,
+                hotkey: None,
+                error: None,
+            }
+        }
+        "quit" => {
+            let _ = events.send(Event::Quit);
             Reply {
                 ok: true,
                 app: Some(APP.to_string()),

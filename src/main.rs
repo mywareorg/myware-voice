@@ -55,6 +55,8 @@ enum Command {
     Toggle,
     /// Print the daemon's state.
     Status,
+    /// Stop the daemon.
+    Quit,
     /// Show the daemon log, and where it is.
     Log {
         #[arg(long, default_value_t = 40)]
@@ -125,6 +127,17 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Quit => match daemon::request("quit") {
+            Ok(_) => {
+                println!("stopped");
+                Ok(())
+            }
+            Err(error) if hippo_voice::transport::is_unreachable(&error) => {
+                println!("not running");
+                Ok(())
+            }
+            Err(error) => Err(error),
+        },
         Command::Toggle => {
             let reply = daemon::toggle()?;
             match reply.phase {
@@ -134,7 +147,14 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Status => {
-            let reply = daemon::request("status")?;
+            let reply = match daemon::request("status") {
+                Ok(reply) => reply,
+                Err(error) if hippo_voice::transport::is_unreachable(&error) => {
+                    println!("not running");
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            };
             if !reply.ok {
                 anyhow::bail!(reply.error.unwrap_or_else(|| "daemon error".into()));
             }

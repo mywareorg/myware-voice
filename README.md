@@ -129,8 +129,25 @@ gallery and a style snapshot.
 
 ## Windows
 
-Compiles and type-checks for `x86_64-pc-windows-msvc`, but has **not been run**:
-there is no Windows machine in this development environment. What is wired:
+Install for the current user from the release folder — no administrator rights:
+
+```powershell
+.\install.ps1
+hippo-voice model download
+```
+
+`install.ps1` copies both executables and the runtime DLLs to
+`%LOCALAPPDATA%\Programs\hippo-voice`, adds that folder to the user `PATH`,
+registers `hippo-voice-daemon.exe` under `HKCU\...\Run` so it starts at login
+without a console window, starts it, and prints `doctor`. `-NoStartup` and
+`-NoPath` make it portable. `uninstall.ps1` reverses every step and asks before
+deleting the 640 MB model.
+
+Unsigned executables make SmartScreen say "Windows protected your PC" until you
+choose More info → Run anyway. That is a signing certificate decision, not a bug.
+
+**Status: compiles and type-checks for `x86_64-pc-windows-msvc`, has not been
+run.** What is wired:
 
 - The daemon registers `ctrl+space` itself with `RegisterHotKey` on a thread with
   a message loop, because a shortcut cannot launch a command line the way sway
@@ -157,6 +174,9 @@ a standalone 7-Zip it downloads to `%LOCALAPPDATA%\hippo-voice\cache`. The
 built-in `tar` has no bzip2, so it cannot do this alone.
 Both DLLs and `onnxruntime_providers_shared.dll` must sit beside the executable:
 Windows resolves a DLL's imports from the application directory, not from the DLL.
+
+For development, fetch the native pieces into the checkout and run from Cargo;
+`$env:HOME = $env:USERPROFILE` is only needed by builds before W1.
 
 Check it from another host with `cargo check --target x86_64-pc-windows-msvc`.
 
