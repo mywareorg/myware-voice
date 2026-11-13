@@ -78,9 +78,10 @@ pub struct Config {
     /// The chord the daemon registers on Windows. Linux uses the compositor's
     /// binding and ignores this.
     ///
-    /// Not `ctrl+space`: that is the input-method switch on several layouts and
-    /// the autocomplete key in most editors, and `RegisterHotKey` takes it away
-    /// from them without asking.
+    /// `ctrl+space` is the product default. While the daemon runs that chord is
+    /// owned system-wide, so the input-method switch on some layouts and the
+    /// autocomplete key in most editors stop reaching their applications. Change
+    /// it here if that matters more than the shorter chord.
     pub hotkey: String,
     /// Keep delivered transcripts at rest. Off by default: the app's premise is
     /// that transcripts stay where the user puts them.
@@ -99,7 +100,7 @@ impl Default for Config {
             trailing_space: true,
             max_seconds: 300.0,
             tones: true,
-            hotkey: "ctrl+alt+space".to_string(),
+            hotkey: "ctrl+space".to_string(),
             history: false,
             history_days: 30,
         }

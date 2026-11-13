@@ -121,9 +121,16 @@ wrong.
 cargo run -p hippo-voice-settings
 ```
 
+It wears the original hippo in the header and the microphone mark in the title
+bar. `scripts/make-app-icons.py` derives every shipped size from
+`icons/microphone-icon-1024.png`: the `.ico` frames, the taskbar bitmap and the
+Linux hicolor tree under `packaging/`.
+
 Two panes: settings, and the transcripts kept when "Keep history" is on. It reads
 `config.toml` and `history.tsv` and writes only the former, so the daemon needs no
-reload protocol.
+reload protocol. The Windows hotkey is editable there; a chord it cannot parse is
+reported instead of saved. The daemon picks up the file on its next capture, which
+means a new chord needs a daemon restart.
 
 It is the second consumer of `hippo-ui` and the reason that library has a
 gallery and a style snapshot.
@@ -141,8 +148,10 @@ hippo-voice model download
 `%LOCALAPPDATA%\Programs\hippo-voice`, adds that folder to the user `PATH`,
 registers `hippo-voice-daemon.exe` under `HKCU\...\Run` so it starts at login
 without a console window, starts it, and prints `doctor`. The daemon also adds a
-**notification-area icon**: left or right click for Settings and history, recent
-transcripts, or Quit. `-NoStartup` and
+**notification-area icon**: left click opens the settings window, right click
+opens a menu with settings, recent transcripts, **Toggle dictation** and Quit.
+The settings window is single-instance, so a second click focuses it instead of
+opening another. `-NoStartup` and
 `-NoPath` make it portable. `uninstall.ps1` reverses every step and asks before
 deleting the 640 MB model.
 
@@ -176,7 +185,10 @@ run.** What is wired:
 
 - The daemon registers `ctrl+space` itself with `RegisterHotKey` on a thread with
   a message loop, because a shortcut cannot launch a command line the way sway
-  launches `hippo-voice toggle`.
+  launches `hippo-voice toggle`. While it runs, that chord is owned system-wide,
+  so the input-method switch on some layouts and editor autocomplete stop
+  reaching their applications; `hotkey = "ctrl+alt+space"` in `config.toml`
+  trades the shorter chord for that. The settings window has the same field.
 - The transport is loopback TCP on an ephemeral port with a per-run token in the
   state directory: an open port is not authority to open a microphone.
 - Delivery is `arboard` for the clipboard and `enigo` (`SendInput`) for the chord.
@@ -200,8 +212,20 @@ built-in `tar` has no bzip2, so it cannot do this alone.
 Both DLLs and `onnxruntime_providers_shared.dll` must sit beside the executable:
 Windows resolves a DLL's imports from the application directory, not from the DLL.
 
-For development, fetch the native pieces into the checkout and run from Cargo;
-`$env:HOME = $env:USERPROFILE` is only needed by builds before W1.
+For development, fetch the native pieces into the checkout and start the tray
+daemon with one command:
+
+```powershell
+.\scripts\run-windows.ps1
+```
+
+It enters the Visual Studio environment when `link.exe` is missing, fetches the
+runtime if it is absent, warns when the model is missing (`-WithModel` fetches
+it), and then runs `cargo run --bin hippo-voice-daemon`. The daemon is a
+GUI-subsystem binary, so no console window survives the launch; the terminal
+stays with cargo until you Quit from the tray. `-Release` uses the release
+profile. The equivalent without the preflight checks is
+`cargo run --bin hippo-voice-daemon`.
 
 Check it from another host with `cargo check --target x86_64-pc-windows-msvc`.
 

@@ -152,6 +152,15 @@ pub fn endpoint_file() -> Result<PathBuf> {
     Ok(state_dir()?.join("endpoint"))
 }
 
+/// A pane request from the tray icon to the already-running settings window.
+///
+/// The settings binary is a separate process, so a second click cannot pass an
+/// argument to the first. The tray writes this file before focusing the window,
+/// and the window reads and deletes it.
+pub fn settings_request_file() -> Result<PathBuf> {
+    Ok(state_dir()?.join("settings-request"))
+}
+
 /// The Unix socket the daemon listens on.
 pub fn socket_file() -> Result<PathBuf> {
     Ok(runtime_dir()?.join("daemon.sock"))

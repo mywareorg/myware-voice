@@ -6,6 +6,9 @@ resolver = "2"
 name = "hippo-voice"
 version = "0.1.0"
 edition = "2021"
+# `cargo run` is the CLI; the Windows tray daemon is launched with
+# scripts\run-windows.ps1 (or `cargo run --bin hippo-voice-daemon`).
+default-run = "hippo-voice"
 description = "Push-to-talk dictation: speak, and the transcript lands in the focused window."
 license = "LGPL-2.1-only"
 repository = "https://gitlab.com/librewarelive/hippo-voice"
@@ -48,6 +51,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 [profile.release]
 lto = true

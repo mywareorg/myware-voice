@@ -10,6 +10,8 @@
 - Imperative subject, no prefix, no trailing period, under ~72 characters.
 - The body says what changed and why; call out known gaps explicitly rather than
   letting the commit imply more than it delivers.
+- Commit and push to `main` without being asked once a change is ready. There is
+  no review step to wait for.
 
 ## This app
 
@@ -37,4 +39,5 @@ Rules that have already cost time elsewhere:
 Linux targets sway/Wayland first; X11 is not a goal until someone needs it.
 Windows compiles and is type-checked for `x86_64-pc-windows-msvc`, but has never
 been run, so treat its runtime behaviour as unproven until someone exercises it
-on a real machine.
+on a real machine. Development stays on Linux; Windows is the test target, and
+`scripts/run-windows.ps1` is how a checkout starts the tray daemon there.

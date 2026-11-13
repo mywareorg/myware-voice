@@ -8,20 +8,45 @@ use hippo_ui::rows::{settings_divider, settings_row, switch_row};
 use hippo_ui::styles::*;
 use hippo_ui::tokens::{self, AppTheme, Scheme};
 use hippo_voice::capture;
+use hippo_voice::chord::Chord;
 use hippo_voice::config::{Config, PasteMethod};
 use hippo_voice::history;
 use hippo_voice::model;
-use iced::widget::{button, column, container, pick_list, row, scrollable, text};
+use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Length, Task};
+use std::sync::OnceLock;
+#[cfg(windows)]
+use std::time::Duration;
 
 const SYSTEM_DEFAULT: &str = "System default";
 const CHUNKS: [&str; 4] = ["10 s", "15 s", "20 s", "30 s"];
 
+/// The header mark, in logical pixels. It sits inside the control height beside
+/// the title, and 128 px of source cover a 4x display.
+const HEADER_LOGO_SIZE: f32 = 28.0;
+
 fn main() -> iced::Result {
+    // The tray icon launches this executable on every click. Focus the window
+    // that is already open instead of stacking another one; the pane request is
+    // picked up by its subscription.
+    #[cfg(windows)]
+    if focus_running_window() {
+        return Ok(());
+    }
+
+    // `window` replaces `window_size`, so the size is carried in the same
+    // settings that add the icon.
+    let window = iced::window::Settings {
+        size: iced::Size::new(700.0, 640.0),
+        icon: window_icon(),
+        ..iced::window::Settings::default()
+    };
+
     iced::application("Hippo Voice", Settings::update, Settings::view)
         .theme(|state: &Settings| state.mode.iced())
         .font(include_bytes!("../assets/bootstrap-icons.ttf").as_slice())
-        .window_size((700.0, 640.0))
+        .window(window)
+        .subscription(Settings::subscription)
         .run_with(Settings::boot)
 }
 
@@ -36,12 +61,14 @@ enum Message {
     Pane(Pane),
     Device(String),
     Paste(PasteMethod),
+    Hotkey(String),
     Theme(AppTheme),
     Chunk(&'static str),
     ToggleTones,
     ToggleHistory,
     ToggleTrailing,
     Refresh,
+    PollRequest,
     Copy(usize),
     ClearHistory,
     Save,
@@ -57,6 +84,8 @@ struct Settings {
     saved: bool,
     error: Option<String>,
     model_state: String,
+    hotkey_draft: String,
+    hotkey_error: Option<String>,
 }
 
 impl Settings {
@@ -85,15 +114,21 @@ impl Settings {
         let entries = load_entries(&config);
         // The tray opens a specific pane; without a window manager there is no
         // way to pass an argument to an iced app, so the choice comes through
-        // the environment.
+        // the environment. A request file covers a window that is already open.
         let pane = match std::env::var("HIPPO_VOICE_START_PANE").as_deref() {
             Ok("history") => Pane::History,
             _ => Pane::Settings,
         };
+        let pane = take_requested_pane().unwrap_or(pane);
+        let hotkey_error = Chord::parse(&config.hotkey)
+            .err()
+            .map(|error| error.to_string());
 
         (
             Self {
                 mode: AppTheme::System,
+                hotkey_draft: config.hotkey.clone(),
+                hotkey_error,
                 config,
                 pane,
                 devices,
@@ -105,6 +140,17 @@ impl Settings {
             },
             Task::none(),
         )
+    }
+
+    fn subscription(_state: &Self) -> iced::Subscription<Message> {
+        #[cfg(windows)]
+        {
+            iced::time::every(Duration::from_millis(400)).map(|_| Message::PollRequest)
+        }
+        #[cfg(not(windows))]
+        {
+            iced::Subscription::none()
+        }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -119,6 +165,16 @@ impl Settings {
                 self.config.device = (name != SYSTEM_DEFAULT).then_some(name);
             }
             Message::Paste(method) => self.config.paste = method,
+            Message::Hotkey(text) => {
+                self.hotkey_draft = text.clone();
+                match Chord::parse(&text) {
+                    Ok(_) => {
+                        self.config.hotkey = text;
+                        self.hotkey_error = None;
+                    }
+                    Err(error) => self.hotkey_error = Some(error.to_string()),
+                }
+            }
             Message::Theme(mode) => self.mode = mode,
             Message::Chunk(label) => {
                 self.config.chunk_seconds = label
@@ -133,6 +189,11 @@ impl Settings {
             }
             Message::ToggleTrailing => self.config.trailing_space = !self.config.trailing_space,
             Message::Refresh => self.entries = load_entries(&self.config),
+            Message::PollRequest => {
+                if let Some(pane) = take_requested_pane() {
+                    self.pane = pane;
+                }
+            }
             Message::Copy(index) => {
                 if let Some(entry) = self.entries.get(index) {
                     match hippo_voice::inject::copy(&entry.text) {
@@ -154,6 +215,10 @@ impl Settings {
     }
 
     fn save(&mut self) {
+        if let Some(error) = &self.hotkey_error {
+            self.error = Some(format!("Hotkey: {error}"));
+            return;
+        }
         let path = match Config::path() {
             Ok(path) => path,
             Err(error) => {
@@ -183,6 +248,9 @@ impl Settings {
         let scheme = self.mode.scheme();
 
         let header = row![
+            iced::widget::image(header_logo())
+                .width(Length::Fixed(HEADER_LOGO_SIZE))
+                .height(Length::Fixed(HEADER_LOGO_SIZE)),
             text("Hippo Voice").size(tokens::TEXT_XL),
             iced::widget::horizontal_space(),
             pick_list(AppTheme::ALL.as_slice(), Some(self.mode), Message::Theme)
@@ -271,6 +339,26 @@ impl Settings {
                 Message::ToggleTrailing,
                 scheme,
             ),
+            settings_divider(scheme),
+            section("Activation", scheme),
+            settings_row(
+                "Hotkey (Windows)",
+                text_input("ctrl+space", self.hotkey_draft.as_str())
+                    .on_input(Message::Hotkey)
+                    .style(pill_input)
+                    .width(Length::Fixed(180.0)),
+                scheme,
+            ),
+            text(match &self.hotkey_error {
+                Some(error) => format!("Not a usable chord: {error}"),
+                None => "The daemon owns this chord system-wide while it runs. Linux uses the compositor binding instead.".to_string(),
+            })
+            .size(tokens::TEXT_XS)
+            .color(if self.hotkey_error.is_some() {
+                scheme.danger
+            } else {
+                scheme.muted
+            }),
             settings_divider(scheme),
             section("Recognition", scheme),
             settings_row(
@@ -417,6 +505,58 @@ impl Settings {
     }
 }
 
+/// Read and delete the pane the tray asked for, if any.
+fn take_requested_pane() -> Option<Pane> {
+    let path = hippo_voice::dirs::settings_request_file().ok()?;
+    let text = std::fs::read_to_string(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    match text.trim() {
+        "history" => Some(Pane::History),
+        "settings" => Some(Pane::Settings),
+        _ => None,
+    }
+}
+
+/// Focus the settings window that is already open, if there is one.
+///
+/// The mutex is the authority: a window that is still starting has no title yet,
+/// but the request file makes it open the right pane when it does. The handle is
+/// deliberately never closed, so it lives exactly as long as this process.
+#[cfg(windows)]
+fn focus_running_window() -> bool {
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
+    };
+
+    let name: Vec<u16> = "Local\\hippo-voice-settings\0".encode_utf16().collect();
+    let title: Vec<u16> = "Hippo Voice\0".encode_utf16().collect();
+
+    unsafe {
+        let handle = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+        if handle.is_null() {
+            return false;
+        }
+        // A second process is the one that sees the existing mutex.
+        if GetLastError() != ERROR_ALREADY_EXISTS {
+            return false;
+        }
+
+        // The first process may not have created its window yet.
+        for _ in 0..80 {
+            let window = FindWindowW(std::ptr::null(), title.as_ptr());
+            if !window.is_null() {
+                ShowWindow(window, SW_RESTORE);
+                SetForegroundWindow(window);
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        true
+    }
+}
+
 /// The stored seconds as one of the labels the pick list offers.
 fn chunk_label(seconds: f32) -> &'static str {
     CHUNKS
@@ -446,4 +586,27 @@ fn section<'a>(label: &'a str, scheme: Scheme) -> Element<'a, Message> {
         .size(tokens::TEXT_2XS)
         .color(scheme.muted)
         .into()
+}
+
+/// The original hippo, downscaled by `scripts/make-app-icons.py`.
+fn header_logo() -> iced::widget::image::Handle {
+    static LOGO: OnceLock<iced::widget::image::Handle> = OnceLock::new();
+    LOGO.get_or_init(|| {
+        let image = image::load_from_memory(include_bytes!("../../icons/hippo.png"))
+            .expect("bundled header mark")
+            .into_rgba8();
+        let (width, height) = image.dimensions();
+        iced::widget::image::Handle::from_rgba(width, height, image.into_raw())
+    })
+    .clone()
+}
+
+/// Title-bar and taskbar icon. It is the same artwork `build.rs` embeds, so the
+/// window, the taskbar and Explorer agree; `None` only if the PNG will not decode.
+fn window_icon() -> Option<iced::window::Icon> {
+    let image = image::load_from_memory(include_bytes!("../../icons/app-256.png"))
+        .ok()?
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    iced::window::icon::from_rgba(image.into_raw(), width, height).ok()
 }

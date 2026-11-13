@@ -564,8 +564,8 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
     #[cfg(windows)]
     {
         let chord = crate::chord::Chord::parse(&config.hotkey).unwrap_or_else(|error| {
-            note(&format!("hotkey: {error}; falling back to ctrl+alt+space"));
-            crate::chord::Chord::parse("ctrl+alt+space").expect("the default chord is valid")
+            note(&format!("hotkey: {error}; falling back to ctrl+space"));
+            crate::chord::Chord::parse("ctrl+space").expect("the default chord is valid")
         });
         crate::hotkey::spawn(events_tx.clone(), chord, Arc::clone(&status))?;
     }

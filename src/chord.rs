@@ -126,12 +126,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_default_chord_parses_and_round_trips() {
-        let chord = Chord::parse("ctrl+alt+space").expect("parse");
-        assert!(chord.ctrl && chord.alt);
-        assert!(!chord.shift && !chord.win);
+    fn the_configured_default_parses_and_round_trips() {
+        let chord = Chord::parse(&crate::config::Config::default().hotkey).expect("parse");
+        assert!(chord.ctrl);
+        assert!(!chord.alt && !chord.shift && !chord.win);
         assert_eq!(chord.key, Key::Space);
-        assert_eq!(chord.to_string(), "ctrl+alt+space");
+        assert_eq!(chord.to_string(), "ctrl+space");
     }
 
     #[test]
@@ -153,15 +153,5 @@ mod tests {
         assert!(Chord::parse("ctrl").is_err(), "no key");
         assert!(Chord::parse("ctrl+a+b").is_err(), "two keys");
         assert!(Chord::parse("ctrl+banana").is_err(), "unknown key");
-    }
-
-    /// `ctrl+space` is the input-method switch on several layouts and the
-    /// autocomplete key in most editors, so it must not be the default.
-    #[test]
-    fn the_default_is_not_ctrl_space() {
-        assert_ne!(
-            Chord::parse("ctrl+alt+space").unwrap(),
-            Chord::parse("ctrl+space").unwrap()
-        );
     }
 }

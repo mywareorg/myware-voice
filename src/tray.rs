@@ -7,12 +7,16 @@
 //! The menu launches the settings binary rather than talking to the daemon: that
 //! window edits `config.toml` directly and the daemon reads the file on the next
 //! capture, so there is no IPC to keep in step.
+//!
+//! Left click opens settings; right click opens the menu. The settings binary is
+//! single-instance, so a click focuses the window that is already there and asks
+//! it for the requested pane through a small request file.
 
 use std::sync::mpsc::Sender;
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::Result;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_WARNING, NIM_ADD, NIM_DELETE,
@@ -20,10 +24,11 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, GetMessageW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassW,
-    SetForegroundWindow, TrackPopupMenu, TranslateMessage, IDI_APPLICATION, MF_GRAYED,
-    MF_SEPARATOR, MF_STRING, MSG, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_DESTROY,
-    WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
+    DispatchMessageW, GetMessageW, GetSystemMetrics, LoadIconW, LoadImageW, PostMessageW,
+    PostQuitMessage, RegisterClassW, SetForegroundWindow, TrackPopupMenu, TranslateMessage, HICON,
+    IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED, MF_GRAYED, MF_SEPARATOR, MF_STRING,
+    MSG, SM_CXSMICON, SM_CYSMICON, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP,
+    WM_DESTROY, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
 };
 
 use crate::daemon::Event;
@@ -31,10 +36,13 @@ use crate::daemon::Event;
 /// Callback message the shell sends for clicks on the icon.
 const WM_TRAY: u32 = WM_APP + 1;
 const ICON_ID: u32 = 1;
+/// Resource id winresource gives `icons/app.ico` in build.rs.
+const APP_ICON_RESOURCE: u16 = 1;
 
 const CMD_SETTINGS: usize = 1;
 const CMD_HISTORY: usize = 2;
-const CMD_QUIT: usize = 3;
+const CMD_TOGGLE: usize = 3;
+const CMD_QUIT: usize = 4;
 
 struct Context {
     events: Sender<Event>,
@@ -149,9 +157,10 @@ fn run(events: Sender<Event>) -> Result<()> {
         data.uID = ICON_ID;
         data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         data.uCallbackMessage = WM_TRAY;
-        // The stock application icon, until the mark is built in as a resource.
-        data.hIcon = LoadIconW(std::ptr::null_mut(), IDI_APPLICATION);
-        let tip: Vec<u16> = "Hippo Voice - press the hotkey to dictate\0"
+        // Embedded by build.rs as resource 1, so the notification area shows the
+        // same mark as Explorer and the taskbar.
+        data.hIcon = load_icon(instance);
+        let tip: Vec<u16> = "Hippo Voice - click to open settings, ctrl+space to dictate\0"
             .encode_utf16()
             .collect();
         for (slot, value) in data.szTip.iter_mut().zip(tip.iter()) {
@@ -176,6 +185,27 @@ fn run(events: Sender<Event>) -> Result<()> {
     }
 }
 
+/// The small-icon frame of the embedded .ico, so the shell does not resample a
+/// 32 px bitmap down to 16. `LR_SHARED` keeps the handle valid for the process
+/// and saves a `DestroyIcon`.
+unsafe fn load_icon(module: HMODULE) -> HICON {
+    let icon = LoadImageW(
+        module,
+        APP_ICON_RESOURCE as usize as *const u16,
+        IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON),
+        LR_DEFAULTCOLOR | LR_SHARED,
+    );
+    if icon.is_null() {
+        // A binary cross-compiled on a host without a resource compiler carries
+        // no icon; the stock one beats a blank slot.
+        LoadIconW(std::ptr::null_mut(), IDI_APPLICATION)
+    } else {
+        icon as HICON
+    }
+}
+
 unsafe fn build_menu() -> *mut std::ffi::c_void {
     let menu = CreatePopupMenu();
     if menu.is_null() {
@@ -185,10 +215,12 @@ unsafe fn build_menu() -> *mut std::ffi::c_void {
     let header = wide("Hippo Voice");
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, header.as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
-    let settings = wide("Settings and history\u{2026}");
+    let settings = wide("Open settings\u{2026}");
     AppendMenuW(menu, MF_STRING, CMD_SETTINGS, settings.as_ptr());
     let history = wide("Recent transcripts");
     AppendMenuW(menu, MF_STRING, CMD_HISTORY, history.as_ptr());
+    let toggle = wide("Toggle dictation");
+    AppendMenuW(menu, MF_STRING, CMD_TOGGLE, toggle.as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
     let quit = wide("Quit");
     AppendMenuW(menu, MF_STRING, CMD_QUIT, quit.as_ptr());
@@ -210,8 +242,12 @@ unsafe extern "system" fn window_proc(
     match message {
         WM_TRAY => {
             let event = lparam as u32;
-            if event == WM_RBUTTONUP || event == WM_LBUTTONUP {
-                show_menu(window);
+            match event {
+                // A click on the icon is the settings button; the menu lives on
+                // the right button, where Windows users look for it.
+                WM_LBUTTONUP => open_settings("settings"),
+                WM_RBUTTONUP => show_menu(window),
+                _ => {}
             }
             0
         }
@@ -251,8 +287,11 @@ unsafe fn show_menu(window: HWND) {
     DestroyMenu(menu);
 
     match choice {
-        CMD_SETTINGS => open_settings(false),
-        CMD_HISTORY => open_settings(true),
+        CMD_SETTINGS => open_settings("settings"),
+        CMD_HISTORY => open_settings("history"),
+        CMD_TOGGLE => {
+            let _ = events.send(Event::Toggle);
+        }
         CMD_QUIT => {
             let _ = events.send(Event::Quit);
             DestroyWindow(window);
@@ -261,8 +300,30 @@ unsafe fn show_menu(window: HWND) {
     }
 }
 
+/// Ask the running settings window for a pane.
+///
+/// A second process cannot be passed an argument, so the request goes through a
+/// file that the window polls. Written before every launch, because the window
+/// may already be running and only need focusing.
+fn request_pane(pane: &str) {
+    let Ok(path) = crate::dirs::settings_request_file() else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(error) = std::fs::write(&path, pane) {
+        crate::log::write(&format!(
+            "tray: could not write {}: {error}",
+            path.display()
+        ));
+    }
+}
+
 /// Launch the settings binary that sits beside this executable.
-fn open_settings(history: bool) {
+fn open_settings(pane: &str) {
+    request_pane(pane);
+
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
@@ -273,12 +334,10 @@ fn open_settings(history: bool) {
         return;
     }
 
-    let mut command = std::process::Command::new(path);
-    if history {
-        command.env("HIPPO_VOICE_START_PANE", "history");
-    }
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut command = std::process::Command::new(path);
+    command.env("HIPPO_VOICE_START_PANE", pane);
     command.creation_flags(CREATE_NO_WINDOW);
     if let Err(error) = command.spawn() {
         crate::log::write(&format!("tray: could not start settings: {error}"));
