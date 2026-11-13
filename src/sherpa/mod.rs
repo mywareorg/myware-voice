@@ -75,25 +75,44 @@ fn library_file() -> &'static str {
 /// 2. `lib/` beside the executable
 /// 3. `vendor/sherpa/lib` relative to the source tree, for development
 pub fn resolve_library() -> Result<PathBuf> {
-    let name = library_file();
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    resolve_library_in(
+        &|key| std::env::var_os(key),
+        exe_dir.as_deref(),
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    )
+}
 
+/// The search order, with its inputs passed in so every layout can be tested on
+/// any host:
+///
+/// 1. `HIPPO_VOICE_SHERPA_DIR`, an explicit override for a hand-placed runtime
+/// 2. beside the executable, which is where the release folder puts it
+/// 3. the executable's `lib/`
+/// 4. `vendor/sherpa/lib` in the source tree, for development
+///
+/// The packaged layout comes before the source tree on purpose: a developer who
+/// has both should exercise what users get, not a stale vendored copy.
+pub fn resolve_library_in(
+    env: &dyn Fn(&str) -> Option<std::ffi::OsString>,
+    exe_dir: Option<&Path>,
+    manifest_dir: &Path,
+) -> Result<PathBuf> {
+    let name = library_file();
     let mut candidates = Vec::new();
-    if let Some(dir) = std::env::var_os("HIPPO_VOICE_SHERPA_DIR") {
+
+    if let Some(dir) = env("HIPPO_VOICE_SHERPA_DIR") {
         let dir = PathBuf::from(dir);
         candidates.push(dir.join("lib").join(name));
         candidates.push(dir.join(name));
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join("lib").join(name));
-            candidates.push(dir.join(name));
-        }
+    if let Some(dir) = exe_dir {
+        candidates.push(dir.join("lib").join(name));
+        candidates.push(dir.join(name));
     }
-    candidates.push(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("vendor/sherpa/lib")
-            .join(name),
-    );
+    candidates.push(manifest_dir.join("vendor/sherpa/lib").join(name));
 
     candidates
         .iter()
@@ -138,10 +157,24 @@ fn open_library(path: &Path) -> Result<Library> {
 }
 
 fn dependency_hint(path: &Path) -> String {
-    format!(
+    let hint = format!(
         "load {} - its dependencies must sit beside it (onnxruntime.dll on Windows)",
         path.display()
-    )
+    );
+    #[cfg(windows)]
+    {
+        // sherpa-onnx-c-api.dll and onnxruntime.dll are C++ and import
+        // vcruntime140/msvcp140; without them the load fails with "the specified
+        // module could not be found", which reads like a missing sherpa DLL.
+        return format!(
+            "{hint}. If the DLL is present, install the Microsoft Visual C++ \
+             Redistributable (x64): the runtime needs vcruntime140 and msvcp140"
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        hint
+    }
 }
 
 impl Sherpa {
@@ -355,5 +388,101 @@ mod tests {
     fn the_vendored_runtime_loads() {
         let sherpa = Sherpa::open().expect("load sherpa");
         assert!(!sherpa.version().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod resolution {
+    use super::*;
+    use std::ffi::OsString;
+    use std::fs;
+
+    struct Tree(PathBuf);
+
+    impl Tree {
+        fn new(name: &str) -> Self {
+            let root = std::env::temp_dir()
+                .join(format!("hippo-voice-sherpa-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(&root).unwrap();
+            Self(root)
+        }
+
+        /// Create a file at `relative`: that is the layout the loader looks for.
+        fn touch(&self, relative: &str) -> PathBuf {
+            let path = self.0.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, b"not a real library").unwrap();
+            path
+        }
+    }
+
+    impl Drop for Tree {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn no_env(_: &str) -> Option<OsString> {
+        None
+    }
+
+    #[test]
+    fn the_release_layout_beside_the_executable_is_found() {
+        let tree = Tree::new("release");
+        let expected = tree.touch(&format!("app/{}", library_file()));
+
+        let found = resolve_library_in(&no_env, Some(&tree.0.join("app")), &tree.0.join("src"))
+            .expect("resolve");
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn a_lib_subdirectory_beside_the_executable_also_works() {
+        let tree = Tree::new("lib");
+        let expected = tree.touch(&format!("app/lib/{}", library_file()));
+
+        let found = resolve_library_in(&no_env, Some(&tree.0.join("app")), &tree.0.join("src"))
+            .expect("resolve");
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn the_source_tree_is_the_development_fallback() {
+        let tree = Tree::new("dev");
+        let expected = tree.touch(&format!("src/vendor/sherpa/lib/{}", library_file()));
+
+        let found = resolve_library_in(
+            &no_env,
+            Some(&tree.0.join("target/debug")),
+            &tree.0.join("src"),
+        )
+        .expect("resolve");
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn an_explicit_override_wins_over_everything_else() {
+        let tree = Tree::new("override");
+        tree.touch(&format!("app/{}", library_file()));
+        tree.touch(&format!("src/vendor/sherpa/lib/{}", library_file()));
+        let expected = tree.touch(&format!("elsewhere/lib/{}", library_file()));
+
+        let env = |key: &str| {
+            (key == "HIPPO_VOICE_SHERPA_DIR").then(|| OsString::from(tree.0.join("elsewhere")))
+        };
+        let found = resolve_library_in(&env, Some(&tree.0.join("app")), &tree.0.join("src"))
+            .expect("resolve");
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn nothing_anywhere_says_how_to_fix_it() {
+        let tree = Tree::new("missing");
+        let error = resolve_library_in(&no_env, Some(&tree.0.join("app")), &tree.0.join("src"))
+            .expect_err("should not resolve");
+        let text = error.to_string();
+        assert!(text.contains("fetch-sherpa"), "{text}");
+        assert!(text.contains("HIPPO_VOICE_SHERPA_DIR"), "{text}");
     }
 }

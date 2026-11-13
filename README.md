@@ -161,6 +161,12 @@ stages the Visual C++ runtime so a clean machine can start the exe, and writes
 `dist\hippo-voice-<version>-win-x64` plus a zip of it. `-SkipTests`, `-Dev`, `-NoZip` and `-WithModel` are the useful switches; the
 640 MB model is not bundled unless you ask.
 
+The release folder needs the Visual C++ runtime beside the exes:
+`sherpa-onnx-c-api.dll` imports `vcruntime140`/`msvcp140` and `onnxruntime.dll`
+also imports `msvcp140_1`. `build-windows.ps1` stages them from the Visual Studio
+redistributable; the CI artifact does not, so on a machine without the
+redistributable installed, `doctor` will report the runtime as unloadable.
+
 **Status: compiles and type-checks for `x86_64-pc-windows-msvc`, has not been
 run.** What is wired:
 

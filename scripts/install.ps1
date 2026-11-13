@@ -34,6 +34,15 @@ Get-ChildItem -LiteralPath $Source -File |
     ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $target -Force }
 Write-Host "installed to $target"
 
+# The CI artifact carries no Visual C++ runtime: sherpa-onnx-c-api.dll imports
+# vcruntime140 and msvcp140, and onnxruntime.dll also imports msvcp140_1.
+$vc = @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'msvcp140_1.dll')
+$missingVc = @($vc | Where-Object { -not (Test-Path -LiteralPath (Join-Path $target $_)) })
+if ($missingVc.Count -gt 0) {
+    Write-Warning ("the release folder has no Visual C++ runtime ({0})" -f ($missingVc -join ', '))
+    Write-Warning 'if the app fails to start, install the Microsoft Visual C++ Redistributable (x64)'
+}
+
 if (-not $NoPath) {
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if ($null -eq $userPath) { $userPath = '' }

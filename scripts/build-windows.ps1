@@ -114,13 +114,24 @@ function Copy-VcRuntime {
         return $false
     }
 
+    # Copy by family, not by a fixed list: sherpa-onnx-c-api.dll imports
+    # VCRUNTIME140 and MSVCP140, and onnxruntime.dll also imports MSVCP140_1.
+    # A missing member of either family fails the load with "the specified module
+    # could not be found", which reads like a missing sherpa DLL.
     $copied = 0
-    foreach ($dll in @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll')) {
-        $from = Join-Path $crt $dll
-        if (Test-Path -LiteralPath $from) {
-            Copy-Item -LiteralPath $from -Destination $Destination
-            $copied++
-        }
+    foreach ($pattern in @('vcruntime140*.dll', 'msvcp140*.dll', 'concrt140*.dll')) {
+        Get-ChildItem -LiteralPath $crt -Filter $pattern -File -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination $Destination -Force
+                $copied++
+            }
+    }
+
+    $needed = @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'msvcp140_1.dll')
+    $missing = @($needed | Where-Object { -not (Test-Path -LiteralPath (Join-Path $Destination $_)) })
+    if ($missing.Count -gt 0) {
+        Write-Warning ("missing from the staged runtime: {0}" -f ($missing -join ', '))
+        Write-Warning 'the app will need the Microsoft Visual C++ Redistributable (x64) installed'
     }
     return ($copied -gt 0)
 }
