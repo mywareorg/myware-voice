@@ -2,9 +2,8 @@
 
 ## Branches
 
-- Do the work on `dev`. `main` should only ever hold a state worth releasing
-  from.
-- Ask before merging `dev` into `main`.
+- Work on `main`. There is one developer; a tag marks what is releasable, not a
+  branch. `dev` is retired.
 
 ## Commits
 

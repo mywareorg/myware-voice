@@ -107,12 +107,48 @@ pub fn resolve_library() -> Result<PathBuf> {
         })
 }
 
+/// Open the shared object.
+///
+/// `Library::new` passes no flags to `LoadLibraryExW`, so Windows resolves the
+/// DLL's imports from the *application* directory and `PATH` - never from the
+/// directory of the DLL that imports it. Linux is saved by `$ORIGIN`; Windows
+/// needs `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR`, or `sherpa-onnx-c-api.dll` loads and
+/// then fails on `onnxruntime.dll`.
+fn open_library(path: &Path) -> Result<Library> {
+    #[cfg(windows)]
+    {
+        use libloading::os::windows::{
+            Library as WindowsLibrary, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+        };
+
+        let flags = LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+        // SAFETY: the returned library is held in `Sherpa` for as long as any
+        // symbol taken from it is used.
+        let library = unsafe { WindowsLibrary::load_with_flags(path, flags) }
+            .with_context(|| dependency_hint(path))?;
+        Ok(Library::from(library))
+    }
+
+    #[cfg(not(windows))]
+    {
+        // SAFETY: as above.
+        unsafe { Library::new(path) }.with_context(|| dependency_hint(path))
+    }
+}
+
+fn dependency_hint(path: &Path) -> String {
+    format!(
+        "load {} - its dependencies must sit beside it (onnxruntime.dll on Windows)",
+        path.display()
+    )
+}
+
 impl Sherpa {
     pub fn load(path: &Path) -> Result<Arc<Self>> {
         // SAFETY: `Library` keeps the code mapped for as long as `fns` lives,
         // and every symbol is required for the recognizer to work at all.
-        let lib =
-            unsafe { Library::new(path) }.with_context(|| format!("load {}", path.display()))?;
+        let lib = open_library(path)?;
 
         unsafe {
             macro_rules! sym {
