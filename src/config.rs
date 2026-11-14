@@ -68,6 +68,9 @@ pub struct Config {
     /// Split a recording at silences into chunks this long. Parakeet degrades on
     /// long single clips and grows memory, so this is a correctness limit.
     pub chunk_seconds: f32,
+    /// ONNX Runtime threads for the recognizer. Four saturates the machine this
+    /// was measured on; more mostly adds contention with the audio callback.
+    pub threads: i32,
     /// Drop the warm recognizer after this many minutes idle. Zero keeps it.
     pub idle_unload_minutes: u32,
     /// Append a space to each transcript so consecutive dictations concatenate.
@@ -115,6 +118,7 @@ impl Default for Config {
             device: None,
             paste: PasteMethod::Auto,
             chunk_seconds: 20.0,
+            threads: 4,
             idle_unload_minutes: 30,
             trailing_space: true,
             max_seconds: 300.0,

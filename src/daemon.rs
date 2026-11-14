@@ -32,6 +32,11 @@ use crate::transport::{self, Listener, Stream};
 /// Longest pause between event-loop polls. Also the status freshness.
 const TICK: Duration = Duration::from_millis(100);
 
+/// Milliseconds since `at`, as the spans are reported.
+fn since(at: Instant) -> f32 {
+    at.elapsed().as_secs_f32() * 1000.0
+}
+
 /// Identifies the daemon on the wire, so a recycled port or a socket some other
 /// service has taken over cannot be mistaken for one.
 const APP: &str = "hippo-voice";
@@ -123,6 +128,28 @@ pub struct Status {
     /// Why this copy is not Pro, when there is something worth saying.
     #[serde(default)]
     pub licence: Option<String>,
+    /// Cost of the last delivery. `None` until one happens.
+    #[serde(default)]
+    pub timings: Option<Timings>,
+}
+
+/// What one delivery cost, in milliseconds.
+///
+/// The stop press starts the clock; `total_ms` is when the paste chord returned.
+/// Recorded per delivery so a change to `chunk_seconds`, the thread count or the
+/// model can be argued about with numbers instead of impressions.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct Timings {
+    /// The recognizer itself, summed over the chunks of this capture.
+    pub decode_ms: f32,
+    /// Getting the transcript onto the clipboard. `None` when delivery was
+    /// skipped, which is a different thing from a copy that took no time.
+    pub copy_ms: Option<f32>,
+    /// The paste chord. `None` for the same reason.
+    pub paste_ms: Option<f32>,
+    /// Stop press to the chord returning: queueing, resampling, normalising,
+    /// decoding, copying and pasting.
+    pub total_ms: f32,
 }
 
 /// Columns in the popup's frequency meter.
@@ -146,6 +173,7 @@ impl Default for Status {
             last_error: None,
             tier: Tier::Free,
             licence: None,
+            timings: None,
         }
     }
 }
@@ -161,6 +189,8 @@ pub enum Event {
     Decoded {
         generation: u64,
         text: String,
+        /// How long the recognizer took, for the delivery report.
+        decode_ms: f32,
     },
     /// One incrementally decoded phrase. `final_chunk` ends the session after
     /// its text is delivered.
@@ -215,6 +245,9 @@ pub struct Reply {
     pub tier: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub licence: Option<String>,
+    /// Cost of the last delivery, for `hippo-voice status`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timings: Option<Timings>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -373,6 +406,8 @@ struct Daemon {
     /// Read once at startup. A licence dropped in while the daemon runs takes
     /// effect after a restart, like a hotkey change.
     tier: Tier,
+    /// When the stop press arrived, for the delivery spans.
+    stopped_at: Option<Instant>,
     jobs: Sender<DecodeJob>,
     status: Arc<Mutex<Status>>,
     recorder: Option<Recorder>,
@@ -416,7 +451,11 @@ impl Daemon {
             Event::ToggleStream => self.toggle_stream(),
             // Handled by the run loop, which breaks out of it.
             Event::Quit => Ok(()),
-            Event::Decoded { generation, text } => self.delivered(generation, text),
+            Event::Decoded {
+                generation,
+                text,
+                decode_ms,
+            } => self.delivered(generation, text, decode_ms),
             Event::Streamed {
                 generation,
                 text,
@@ -589,6 +628,9 @@ impl Daemon {
     }
 
     fn stop_recording_and_decode(&mut self) -> Result<()> {
+        // The clock for the delivery spans starts here, at the stop press, not
+        // when the decoder gets round to it.
+        self.stopped_at = Some(Instant::now());
         let Some(recorder) = self.recorder.take() else {
             self.set(Phase::Idle);
             return Ok(());
@@ -1022,7 +1064,7 @@ impl Daemon {
         self.stream_text.clear();
     }
 
-    fn delivered(&mut self, generation: u64, text: String) -> Result<()> {
+    fn delivered(&mut self, generation: u64, text: String, decode_ms: f32) -> Result<()> {
         // A late result from a cancelled capture must not be delivered into the
         // next one.
         if generation != self.generation.load(Ordering::SeqCst) {
@@ -1047,12 +1089,15 @@ impl Daemon {
 
         if self.fake_delivery {
             log::write("delivered (fake delivery)");
+            self.record_timings(decode_ms, None, None);
             self.clear_error();
             self.set(Phase::Idle);
             return Ok(());
         }
 
+        let copy_at = Instant::now();
         inject::copy(&text)?;
+        let copy_ms = since(copy_at);
         if self.config.history {
             if let Err(error) = crate::history::append(text.trim_end()) {
                 note(&format!("history: {error:#}"));
@@ -1066,11 +1111,14 @@ impl Daemon {
                 "Transcript copied",
                 &focus_changed_message(focus_now.is_some()),
             );
+            self.record_timings(decode_ms, Some(copy_ms), None);
             self.set(Phase::Idle);
             return Ok(());
         }
 
+        let paste_at = Instant::now();
         let method = inject::paste(self.config.paste, focus_now.as_ref());
+        let paste_ms = since(paste_at);
         match method {
             Ok(crate::config::PasteMethod::None) => {
                 inject::notify("Transcript copied", "No paste tool available");
@@ -1084,13 +1132,43 @@ impl Daemon {
         if self.config.tones {
             tone::play(Cue::Done);
         }
+        let timings = self.record_timings(decode_ms, Some(copy_ms), Some(paste_ms));
+        // The count, the spans and nothing else: the transcript itself is not the
+        // log's business.
         log::write(&format!(
-            "delivered {} chars",
-            text.trim_end().chars().count()
+            "delivered {} chars · decode {:.0} ms · copy {:.0} ms · paste {:.0} ms · total {:.0} ms",
+            text.trim_end().chars().count(),
+            timings.decode_ms,
+            copy_ms,
+            paste_ms,
+            timings.total_ms
         ));
         self.clear_error();
         self.set(Phase::Idle);
         Ok(())
+    }
+
+    /// Store the spans of this delivery and return them.
+    ///
+    /// `stopped_at` is taken rather than read, so a delivery that never happened
+    /// cannot leave a clock running into the next one.
+    fn record_timings(
+        &mut self,
+        decode_ms: f32,
+        copy_ms: Option<f32>,
+        paste_ms: Option<f32>,
+    ) -> Timings {
+        let total_ms = self.stopped_at.take().map(since).unwrap_or_default();
+        let timings = Timings {
+            decode_ms,
+            copy_ms,
+            paste_ms,
+            total_ms,
+        };
+        if let Ok(mut status) = self.status.lock() {
+            status.timings = Some(timings);
+        }
+        timings
     }
 
     /// A transcript that landed means the last failure is no longer the last word.
@@ -1369,7 +1447,7 @@ pub fn run_process() -> Result<()> {
     } else {
         crate::model::resolve_dir()?
     };
-    run(model, 4)
+    run(model)
 }
 
 /// Run the daemon in the foreground until it is killed.
@@ -1378,7 +1456,7 @@ pub fn run_process() -> Result<()> {
 /// it whenever the file changes, so this is the one place that decides where it
 /// lives, and a file that will not parse must leave the daemon running on the
 /// defaults instead of refusing to start.
-pub fn run(model_dir: PathBuf, threads: i32) -> Result<()> {
+pub fn run(model_dir: PathBuf) -> Result<()> {
     let config_path = Config::path()?;
     let (config, config_error) = match Config::load_from(&config_path) {
         Ok(config) => (config, None),
@@ -1388,6 +1466,9 @@ pub fn run(model_dir: PathBuf, threads: i32) -> Result<()> {
             (Config::default(), Some(message))
         }
     };
+    // Clamped: a zero or negative count is meaningless to ONNX Runtime, and a
+    // hundred threads on a laptop makes the decode slower, not faster.
+    let threads = config.threads.clamp(1, 16);
     let entitlement = licence::load();
     if let Some(note) = &entitlement.note {
         note_error(&format!("licence: {note}"));
@@ -1483,6 +1564,7 @@ pub fn run(model_dir: PathBuf, threads: i32) -> Result<()> {
         config_revision: 0,
         config_error,
         tier: entitlement.tier,
+        stopped_at: None,
         jobs: jobs_tx,
         status,
         recorder: None,
@@ -1586,6 +1668,7 @@ fn serve(
                 streaming: None,
                 tier: None,
                 licence: None,
+                timings: None,
                 error: None,
             }
         }
@@ -1610,6 +1693,7 @@ fn serve(
                 streaming: None,
                 tier: None,
                 licence: None,
+                timings: None,
                 error: None,
             }
         }
@@ -1631,6 +1715,7 @@ fn serve(
                 streaming: None,
                 tier: None,
                 licence: None,
+                timings: None,
                 error: None,
             }
         }
@@ -1652,6 +1737,7 @@ fn serve(
                 streaming: Some(snapshot.streaming),
                 tier: Some(snapshot.tier.arg().to_string()),
                 licence: snapshot.licence,
+                timings: snapshot.timings,
                 error: None,
             }
         }
@@ -1671,6 +1757,7 @@ fn serve(
             streaming: None,
             tier: None,
             licence: None,
+            timings: None,
             error: Some(format!("unknown command {other:?}")),
         },
     };
@@ -1769,6 +1856,7 @@ impl Decoder<'_> {
                     return Some(Event::Decoded {
                         generation,
                         text: canned.to_string(),
+                        decode_ms: 20.0,
                     });
                 }
                 if let Err(failure) = self.ensure_loaded() {
@@ -1780,6 +1868,7 @@ impl Decoder<'_> {
                 // the key again. A single decode call is not interruptible, so
                 // the chunk boundary is the cancel granularity.
                 let mut parts = Vec::new();
+                let decode_at = Instant::now();
                 for (start, end) in crate::audio::split_at_silence(&samples, chunk_seconds) {
                     if self.generation.load(Ordering::SeqCst) != generation {
                         return None;
@@ -1793,6 +1882,7 @@ impl Decoder<'_> {
                 Some(Event::Decoded {
                     generation,
                     text: parts.join(" "),
+                    decode_ms: decode_at.elapsed().as_secs_f32() * 1000.0,
                 })
             }
         }

@@ -85,6 +85,9 @@ enum Command {
         /// Threads for the recognizer.
         #[arg(long, default_value_t = 4)]
         threads: i32,
+        /// Repeat the decode and report the spread. One sample is not a latency.
+        #[arg(long, default_value_t = 1)]
+        repeat: usize,
     },
     /// Run the resident daemon in the foreground.
     Daemon,
@@ -139,7 +142,8 @@ fn main() -> Result<()> {
             path,
             json,
             threads,
-        } => transcribe(&path, json, threads),
+            repeat,
+        } => transcribe(&path, json, threads, repeat),
         Command::Record {
             out,
             seconds,
@@ -243,6 +247,20 @@ fn main() -> Result<()> {
             }
             if let Some(note) = reply.licence {
                 println!("licence: {note}");
+            }
+            if let Some(timings) = reply.timings {
+                let span = |value: Option<f32>| {
+                    value
+                        .map(|ms| format!("{ms:.0} ms"))
+                        .unwrap_or_else(|| "-".to_string())
+                };
+                println!(
+                    "timings: decode {:.0} ms · copy {} · paste {} · total {:.0} ms",
+                    timings.decode_ms,
+                    span(timings.copy_ms),
+                    span(timings.paste_ms),
+                    timings.total_ms
+                );
             }
             if let Some(tier) = reply.tier.filter(|tier| tier != "free") {
                 println!("tier: {tier}");
@@ -573,7 +591,7 @@ fn session_name() -> &'static str {
     }
 }
 
-fn transcribe(path: &Path, json: bool, threads: i32) -> Result<()> {
+fn transcribe(path: &Path, json: bool, threads: i32, repeat: usize) -> Result<()> {
     let dir = model_dir()
         .context("no model directory; set HIPPO_VOICE_MODEL_DIR or run scripts/fetch-model.sh")?;
 
@@ -593,20 +611,30 @@ fn transcribe(path: &Path, json: bool, threads: i32) -> Result<()> {
         .unwrap_or(20.0);
     let spans = audio::split_at_silence(&samples, chunk_seconds);
 
-    let decode_at = Instant::now();
-    let mut parts = Vec::new();
-    for (start, end) in &spans {
-        let text = recognizer.transcribe(&samples[*start..*end])?;
-        if !text.is_empty() {
-            parts.push(text);
+    // The same audio, decoded again and again: allocator state, thermal drift and
+    // warm caches make a single sample misleading, and these are the numbers a
+    // `chunk_seconds` or thread-count change has to be argued with.
+    let mut runs = Vec::with_capacity(repeat.max(1));
+    let mut text = String::new();
+    for _ in 0..repeat.max(1) {
+        let decode_at = Instant::now();
+        let mut parts = Vec::new();
+        for (start, end) in &spans {
+            let chunk = recognizer.transcribe(&samples[*start..*end])?;
+            if !chunk.is_empty() {
+                parts.push(chunk);
+            }
         }
+        text = parts.join(" ");
+        runs.push(decode_at.elapsed().as_secs_f64());
     }
-    let text = parts.join(" ");
-    let decoded = decode_at.elapsed();
-    let chunks = spans.len();
 
+    let mut sorted = runs.clone();
+    sorted.sort_by(f64::total_cmp);
+    let median = percentile(&sorted, 0.5);
     let seconds = samples.len() as f32 / audio::SAMPLE_RATE as f32;
-    let rtf = decoded.as_secs_f32() / seconds.max(f32::EPSILON);
+    let rtf = median as f32 / seconds.max(f32::EPSILON);
+    let chunks = spans.len();
 
     if json {
         let report = serde_json::json!({
@@ -615,7 +643,16 @@ fn transcribe(path: &Path, json: bool, threads: i32) -> Result<()> {
             "gain": gain,
             "t_prepare": prepared.as_secs_f64(),
             "t_load": loaded.as_secs_f64(),
-            "t_decode": decoded.as_secs_f64(),
+            // The median, so a single run reports what it measured and a repeated
+            // one reports the number to quote.
+            "t_decode": median,
+            "runs": runs,
+            "summary": {
+                "min": percentile(&sorted, 0.0),
+                "median": median,
+                "p90": percentile(&sorted, 0.9),
+                "max": percentile(&sorted, 1.0),
+            },
             "rtf": rtf,
             "chunks": chunks,
             "peak_rss_mib": peak_rss_mib(),
@@ -625,17 +662,32 @@ fn transcribe(path: &Path, json: bool, threads: i32) -> Result<()> {
     } else {
         println!("{text}");
         eprintln!(
-            "audio {seconds:.2}s · {chunks} chunk(s) · prepare {:.3}s · load {:.3}s · decode {:.3}s · RTF {rtf:.3} · peak {} MiB",
+            "audio {seconds:.2}s · {chunks} chunk(s) · prepare {:.3}s · load {:.3}s · decode {:.3}s (min {:.3}s · p90 {:.3}s · max {:.3}s of {}) · RTF {rtf:.3} · peak {} MiB",
             prepared.as_secs_f32(),
             loaded.as_secs_f32(),
-            decoded.as_secs_f32(),
+            median,
+            percentile(&sorted, 0.0),
+            percentile(&sorted, 0.9),
+            percentile(&sorted, 1.0),
+            runs.len(),
             peak_rss_mib()
         );
     }
     Ok(())
 }
 
-/// Peak resident set, so the warm-model cost is measured rather than guessed.
+/// Nearest-rank percentile of an ascending slice.
+///
+/// Nearest rank rather than interpolation: every value reported is a run that
+/// actually happened, which is what a measurement should be.
+fn percentile(sorted: &[f64], fraction: f64) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let rank = (fraction * sorted.len() as f64).ceil() as usize;
+    sorted[rank.clamp(1, sorted.len()) - 1]
+}
+
 fn peak_rss_mib() -> u64 {
     #[cfg(target_os = "linux")]
     {
@@ -654,5 +706,21 @@ fn peak_rss_mib() -> u64 {
     #[cfg(not(target_os = "linux"))]
     {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::percentile;
+
+    #[test]
+    fn percentiles_pick_a_run_that_happened() {
+        let runs = [1.0, 2.0, 3.0, 4.0, 5.0];
+        // Nearest rank: every answer is a sample, never an interpolation.
+        assert_eq!(percentile(&runs, 0.0), 1.0);
+        assert_eq!(percentile(&runs, 0.5), 3.0);
+        assert_eq!(percentile(&runs, 0.9), 5.0);
+        assert_eq!(percentile(&runs, 1.0), 5.0);
+        assert_eq!(percentile(&[], 0.5), 0.0);
     }
 }

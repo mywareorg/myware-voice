@@ -50,6 +50,7 @@ struct Fixture {
     /// Dropped last: removes the directories the daemon was pointed at.
     _temp: Temp,
     config_path: PathBuf,
+    log_path: PathBuf,
     _daemon: Daemon,
 }
 
@@ -115,12 +116,19 @@ impl Fixture {
         Self {
             _temp: temp,
             config_path,
+            // `XDG_STATE_HOME/hippo-voice/log`, the same resolution the daemon
+            // uses, so a test can read what it wrote.
+            log_path: state_home.join("hippo-voice").join("log"),
             _daemon: daemon,
         }
     }
 
     fn write_config(&self, text: &str) {
         std::fs::write(&self.config_path, text).expect("rewrite the config");
+    }
+
+    fn log(&self) -> String {
+        std::fs::read_to_string(&self.log_path).unwrap_or_default()
     }
 }
 
@@ -456,4 +464,40 @@ fn a_licence_is_reported_and_never_blocks_dictation() {
     // Nothing about licensing may stand between the user and their transcript.
     let text = deliver_once();
     assert_eq!(text.as_deref(), Some("hello from the test"));
+}
+
+#[test]
+fn a_transcript_never_reaches_the_log() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let fixture = Fixture::start(
+        "redaction",
+        "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("swordfish is the password"),
+        &[],
+    );
+
+    let text = deliver_once();
+    assert_eq!(text.as_deref(), Some("swordfish is the password"));
+
+    let log = fixture.log();
+    assert!(
+        log.contains("delivered"),
+        "the log says nothing about the delivery: {log}"
+    );
+    assert!(
+        !log.contains("swordfish"),
+        "the transcript reached the log: {log}"
+    );
+
+    // The delivery spans are what a tuning change is argued with.
+    let timings = daemon::request("status")
+        .expect("status")
+        .timings
+        .expect("no timings for the delivery");
+    assert!(timings.total_ms > 0.0, "the total span is zero");
+    assert!(timings.decode_ms > 0.0, "the decode span is zero");
+    assert_eq!(
+        timings.copy_ms, None,
+        "a fake delivery reported a clipboard span"
+    );
 }

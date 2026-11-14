@@ -40,7 +40,8 @@ focused window can be read, the licence tier, and which of `wl-copy`, `wtype`,
 `ydotool` and `notify-send` it found.
 
 `transcribe --json` reports `t_prepare`, `t_load`, `t_decode`, RTF and peak RSS,
-which is how the warm-model decision is measured rather than guessed.
+which is how the warm-model decision is measured rather than guessed. `--repeat N`
+adds the spread: every run, and a summary of min, median, p90 and max.
 
 `model status | verify | download` owns the 640 MB package. `verify` hashes every
 file; `download` resumes a partial file, re-downloads one whose checksum is
@@ -78,7 +79,12 @@ idle 0.0s
 hotkey: compositor binding
 paste: ydotool
 config: revision 3
+timings: decode 380 ms · copy 12 ms · paste 9 ms · total 1180 ms
 ```
+
+Two keys set how the recognizer runs: `chunk_seconds` (20 s) is the silence-split
+length, and `threads` (4, clamped to 1..16) is ONNX Runtime's thread count. Both
+are settled with `transcribe --repeat` rather than by feel — see "Measured".
 
 Hotkeys are the exception: the Windows daemon registers its chords at startup, so
 a new chord needs a restart. Nothing else does.
@@ -127,6 +133,23 @@ On a Ryzen 7 PRO 8840U, 4 threads, int8:
 
 Peak RSS above 1 GB is the warm model. The daemon loads it once and keeps it
 warm, so the load time is paid on the first utterance rather than on every one.
+
+These are single samples, which is why nothing here is a tuning decision on its
+own. `transcribe --repeat 5 --json` decodes the same audio five times and reports
+`runs` plus a `summary` of min, median, p90 and max: nearest rank, so every number
+is a run that actually happened. Change `chunk_seconds` or `threads` with that in
+front of you, not from one warm cache.
+
+The daemon measures itself too. Every delivery records the stop press to the paste
+chord, and `hippo-voice status` prints it:
+
+```
+timings: decode 380 ms · copy 12 ms · paste 9 ms · total 1180 ms
+```
+
+`total` includes the queueing, the resample and the normalise, so it is the number
+the user actually feels. `copy` and `paste` are `-` when the delivery was skipped,
+which is a different thing from a copy that took no time.
 
 ## Keybind and autostart (sway)
 
