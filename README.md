@@ -36,8 +36,8 @@ cargo build
 ```
 
 `doctor` prints the resolved runtime, the model, the session type, whether the
-focused window can be read, and which of `wl-copy`, `wtype`, `ydotool` and
-`notify-send` it found.
+focused window can be read, the licence tier, and which of `wl-copy`, `wtype`,
+`ydotool` and `notify-send` it found.
 
 `transcribe --json` reports `t_prepare`, `t_load`, `t_decode`, RTF and peak RSS,
 which is how the warm-model decision is measured rather than guessed.
@@ -98,7 +98,7 @@ loads a fresh one — instead of wedging the daemon in `decoding` for the sessio
 
 ## Testing
 
-Six environment variables let the whole pipeline run with no microphone and no
+Seven environment variables let the whole pipeline run with no microphone and no
 model, which is how `tests/daemon.rs` drives a real daemon over its real socket
 on CI:
 
@@ -113,6 +113,7 @@ on CI:
   every decode so a second press arrives mid-decode.
 - `HIPPO_VOICE_FAKE_FOCUS` — the focused window as `app:window`, so a test does
   not need a compositor that can answer.
+- `HIPPO_VOICE_LICENCE` — the licence file, named outright.
 
 ## Measured
 
@@ -211,6 +212,50 @@ of saved. Everything except the hotkeys takes effect without a restart — see
 
 It is the second consumer of `hippo-ui` and the reason that library has a
 gallery and a style snapshot.
+
+## Licensing
+
+Everything that dictates is free: the daemon, both models, the settings window,
+streaming with Parakeet phrase chunks, the history, the tray. Pro is a signed file
+that unlocks the extras — today that is the word-by-word zipformer
+(`stream_online`), which is otherwise a 73 MB download for a worse transcript.
+
+The licence is a short document with an Ed25519 signature, checked offline against
+a public key compiled into the binary. Nothing is fetched and nothing phones home:
+
+```
+subject = "someone@example.com"
+tier = "pro"
+issued = 1794692085
+---
+<128 hex characters>
+```
+
+The signature covers the document byte for byte, so an edited `tier` line stops
+verifying rather than quietly granting itself Pro. `expires` is optional; without
+it the licence is perpetual, and an expired one drops to the free tier with a
+sentence in `status` and `doctor` rather than refusing to run.
+
+A source build has no public key and therefore verifies nothing — that is
+deliberate, so a rebuilt or forked binary cannot manufacture licences. A release
+build names one:
+
+```bash
+HIPPO_VOICE_LICENCE_PUBKEY=<64 hex characters> cargo build --release
+```
+
+Issuing is `licence keygen`, then `licence sign`, both hidden from `--help`
+because they are not things a user does:
+
+```bash
+hippo-voice licence keygen > keys.txt        # keep the private line off this machine
+hippo-voice licence sign --subject someone@example.com --key private.key > licence
+hippo-voice licence show                    # what is in force here, and why not
+```
+
+`HIPPO_VOICE_LICENCE` names the file for a test; the installed one is
+`$XDG_DATA_HOME/hippo-voice/licence`. The daemon reads it at startup, so a
+licence dropped in while it runs applies after a restart.
 
 ## Windows
 

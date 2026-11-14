@@ -420,3 +420,40 @@ fn streaming_commits_a_phrase_while_the_key_is_still_down() {
     assert_eq!(status.text.as_deref(), Some("hello from the test"));
     assert_eq!(status.last_error, None);
 }
+
+#[test]
+fn a_licence_is_reported_and_never_blocks_dictation() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    // The licence lives outside the fixture's own directory, because `Temp::new`
+    // clears the directory it is given.
+    let holder = Temp::new("licence-file");
+    let licence = holder.0.join("licence");
+    std::fs::write(&licence, "subject = \"nobody\"\ntier = \"pro\"\n---\n00\n")
+        .expect("write the licence");
+
+    let _fixture = Fixture::start(
+        "licence",
+        "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("hello from the test"),
+        &[("HIPPO_VOICE_LICENCE", licence.to_str().expect("utf-8"))],
+    );
+
+    let status = daemon::request("status").expect("status");
+    assert!(
+        status.tier.is_some(),
+        "the daemon did not report a tier at all"
+    );
+    if status.tier.as_deref() == Some("free") {
+        let note = status
+            .licence
+            .expect("a free tier with a licence file and no reason");
+        assert!(
+            note.to_lowercase().contains("licence"),
+            "the reason does not mention the licence: {note}"
+        );
+    }
+
+    // Nothing about licensing may stand between the user and their transcript.
+    let text = deliver_once();
+    assert_eq!(text.as_deref(), Some("hello from the test"));
+}

@@ -13,6 +13,7 @@ pub mod history;
 #[cfg(windows)]
 pub mod hotkey;
 pub mod inject;
+pub mod licence;
 pub mod log;
 pub mod model;
 #[cfg(windows)]

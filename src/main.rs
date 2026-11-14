@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
 use hippo_voice::audio;
@@ -10,6 +10,7 @@ use hippo_voice::config::Config;
 use hippo_voice::daemon;
 use hippo_voice::history;
 use hippo_voice::inject;
+use hippo_voice::licence::{self, Tier};
 use hippo_voice::log;
 use hippo_voice::model;
 use hippo_voice::sherpa::Sherpa;
@@ -42,6 +43,31 @@ enum ModelCommand {
     Download {
         #[arg(long)]
         streaming: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum LicenceCommand {
+    /// Show the tier in force, and why it is not Pro when it is not.
+    Show,
+    /// Print a key pair. The private half issues licences and never ships.
+    #[command(hide = true)]
+    Keygen,
+    /// Sign a licence document and print it.
+    #[command(hide = true)]
+    Sign {
+        /// Who it is issued to. Printed on the licence, never checked.
+        #[arg(long)]
+        subject: String,
+        /// Tier to grant.
+        #[arg(long, default_value = "pro")]
+        tier: String,
+        /// Unix seconds after which it stops being valid; omit for perpetual.
+        #[arg(long)]
+        expires: Option<u64>,
+        /// File holding the 64 hex characters of the private key.
+        #[arg(long)]
+        key: PathBuf,
     },
 }
 
@@ -88,6 +114,11 @@ enum Command {
         #[command(subcommand)]
         command: ModelCommand,
     },
+    /// Show or issue the licence this copy runs under.
+    Licence {
+        #[command(subcommand)]
+        command: LicenceCommand,
+    },
     /// Capture from the microphone and write a WAV.
     Record {
         /// Where to write the recording.
@@ -116,6 +147,7 @@ fn main() -> Result<()> {
         } => record(&out, seconds, device.as_deref()),
         Command::Daemon => daemon::run_process(),
         Command::Model { command } => model_command(command),
+        Command::Licence { command } => licence_command(command),
         Command::Log { lines } => {
             println!("{}", log::path()?.display());
             for line in log::tail(lines)? {
@@ -209,9 +241,68 @@ fn main() -> Result<()> {
             if let Some(error) = reply.last_error {
                 println!("last error: {error}");
             }
+            if let Some(note) = reply.licence {
+                println!("licence: {note}");
+            }
+            if let Some(tier) = reply.tier.filter(|tier| tier != "free") {
+                println!("tier: {tier}");
+            }
             if let Some(text) = reply.text {
                 println!("last: {text}");
             }
+            Ok(())
+        }
+    }
+}
+
+fn licence_command(command: LicenceCommand) -> Result<()> {
+    match command {
+        LicenceCommand::Show => {
+            let entitlement = licence::load();
+            println!("file          {}", licence::path()?.display());
+            println!("tier          {}", entitlement.tier);
+            if let Some(subject) = entitlement.subject {
+                println!("subject       {subject}");
+            }
+            if let Some(expires) = entitlement.expires {
+                println!("expires       {}", log::stamp(expires));
+            }
+            if let Some(note) = entitlement.note {
+                println!("note          {note}");
+            }
+            if licence::PUBLIC_KEY.is_none() {
+                println!("key           none baked in, so this build verifies no licence");
+            }
+            Ok(())
+        }
+        LicenceCommand::Keygen => {
+            let (public, private) = licence::keygen();
+            println!("public  {public}");
+            println!("private {private}");
+            eprintln!(
+                "build with HIPPO_VOICE_LICENCE_PUBKEY=<public>; keep <private> off the machines that run the app"
+            );
+            Ok(())
+        }
+        LicenceCommand::Sign {
+            subject,
+            tier,
+            expires,
+            key,
+        } => {
+            let tier = match tier.as_str() {
+                "pro" => Tier::Pro,
+                "free" => Tier::Free,
+                other => bail!("unknown tier {other:?}; expected pro or free"),
+            };
+            let key = licence::read_signing_key(&key)?;
+            let claims = licence::Claims {
+                subject,
+                tier,
+                issued: Some(licence::now()),
+                expires,
+            };
+            print!("{}", licence::sign(&claims, &key));
             Ok(())
         }
     }
@@ -338,6 +429,20 @@ fn doctor() -> Result<()> {
         config.paste.arg(),
         inject::resolve(config.paste).arg()
     );
+    let entitlement = licence::load();
+    println!(
+        "licence       {}{}",
+        entitlement.tier,
+        match (&entitlement.subject, entitlement.expires) {
+            (Some(subject), Some(expires)) =>
+                format!(" to {subject}, expires {}", log::stamp(expires)),
+            (Some(subject), None) => format!(" to {subject}"),
+            _ => String::new(),
+        }
+    );
+    if let Some(note) = &entitlement.note {
+        println!("  note        {note}");
+    }
     #[cfg(unix)]
     println!(
         "cue player    {}",

@@ -23,6 +23,7 @@ use crate::audio;
 use crate::capture::Recorder;
 use crate::config::{Config, Stamp};
 use crate::inject::{self, Focus};
+use crate::licence::{self, Tier};
 use crate::log;
 use crate::sherpa::Sherpa;
 use crate::tone::{self, Cue};
@@ -116,6 +117,12 @@ pub struct Status {
     /// when a transcript is delivered, so it always describes the last cycle.
     #[serde(default)]
     pub last_error: Option<String>,
+    /// The tier in force. `free` unless a valid licence was found at startup.
+    #[serde(default)]
+    pub tier: Tier,
+    /// Why this copy is not Pro, when there is something worth saying.
+    #[serde(default)]
+    pub licence: Option<String>,
 }
 
 /// Columns in the popup's frequency meter.
@@ -137,6 +144,8 @@ impl Default for Status {
             config_revision: 0,
             config_error: None,
             last_error: None,
+            tier: Tier::Free,
+            licence: None,
         }
     }
 }
@@ -201,6 +210,11 @@ pub struct Reply {
     /// Whether the current capture commits phrases while the user speaks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub streaming: Option<bool>,
+    /// The tier in force, and why it is not Pro when it is not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub licence: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -356,6 +370,9 @@ struct Daemon {
     pending_config: Option<Config>,
     config_revision: u64,
     config_error: Option<String>,
+    /// Read once at startup. A licence dropped in while the daemon runs takes
+    /// effect after a restart, like a hotkey change.
+    tier: Tier,
     jobs: Sender<DecodeJob>,
     status: Arc<Mutex<Status>>,
     recorder: Option<Recorder>,
@@ -466,7 +483,7 @@ impl Daemon {
             self.stream_committed = committed;
             self.stream_focus = inject::focus();
             self.stream_text.clear();
-            if self.config.stream_online {
+            if self.word_by_word() {
                 if let Err(error) = self.open_online() {
                     note_error(&format!(
                         "streaming model unavailable; using phrase chunks instead: {error:#}"
@@ -485,6 +502,15 @@ impl Daemon {
         }
 
         self.start_recording(true)
+    }
+
+    /// Whether the word-by-word engine may be used.
+    ///
+    /// It is the Pro feature. Without a licence streaming still works: the phrase
+    /// chunker is the same session with a different handoff, so the fallback is a
+    /// working mode rather than a refusal.
+    fn word_by_word(&self) -> bool {
+        self.config.stream_online && self.tier.is_pro()
     }
 
     fn start_recording(&mut self, streaming: bool) -> Result<()> {
@@ -526,7 +552,10 @@ impl Daemon {
             "recording on {device}{}",
             if streaming { " (streaming)" } else { "" }
         ));
-        if streaming && self.config.stream_online {
+        if streaming && self.config.stream_online && !self.tier.is_pro() {
+            note("stream_online needs a Pro licence; streaming will use phrase chunks");
+        }
+        if streaming && self.word_by_word() {
             // The capture is already running, so a cold model load overlaps the
             // first words instead of delaying the toast or the microphone.
             if let Err(error) = self.open_online() {
@@ -1359,6 +1388,10 @@ pub fn run(model_dir: PathBuf, threads: i32) -> Result<()> {
             (Config::default(), Some(message))
         }
     };
+    let entitlement = licence::load();
+    if let Some(note) = &entitlement.note {
+        note_error(&format!("licence: {note}"));
+    }
     let config_stamp = Stamp::of(&config_path);
     // `resolve_dir` returns an installed path whether or not the files are there,
     // so a fresh install would otherwise fail at the first utterance with no
@@ -1390,6 +1423,8 @@ pub fn run(model_dir: PathBuf, threads: i32) -> Result<()> {
         view.paste = config.paste.to_string();
         view.config_error = config_error.clone();
         view.last_error = model_problem.clone();
+        view.tier = entitlement.tier;
+        view.licence = entitlement.note.clone();
     }
 
     if let Some(problem) = &model_problem {
@@ -1447,6 +1482,7 @@ pub fn run(model_dir: PathBuf, threads: i32) -> Result<()> {
         pending_config: None,
         config_revision: 0,
         config_error,
+        tier: entitlement.tier,
         jobs: jobs_tx,
         status,
         recorder: None,
@@ -1548,6 +1584,8 @@ fn serve(
                 config_error: None,
                 last_error: None,
                 streaming: None,
+                tier: None,
+                licence: None,
                 error: None,
             }
         }
@@ -1570,6 +1608,8 @@ fn serve(
                 config_error: None,
                 last_error: None,
                 streaming: None,
+                tier: None,
+                licence: None,
                 error: None,
             }
         }
@@ -1589,6 +1629,8 @@ fn serve(
                 config_error: None,
                 last_error: None,
                 streaming: None,
+                tier: None,
+                licence: None,
                 error: None,
             }
         }
@@ -1608,6 +1650,8 @@ fn serve(
                 config_error: snapshot.config_error,
                 last_error: snapshot.last_error,
                 streaming: Some(snapshot.streaming),
+                tier: Some(snapshot.tier.arg().to_string()),
+                licence: snapshot.licence,
                 error: None,
             }
         }
@@ -1625,6 +1669,8 @@ fn serve(
             config_error: None,
             last_error: None,
             streaming: None,
+            tier: None,
+            licence: None,
             error: Some(format!("unknown command {other:?}")),
         },
     };

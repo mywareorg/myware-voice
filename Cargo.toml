@@ -30,6 +30,12 @@ path = "src/bin/daemon.rs"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 cpal = "0.16"
+# Licence verification, offline: the public key is baked in at build time and no
+# request ever leaves the machine.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+hex = "0.4"
+# Only for `licence keygen`, so issuing one does not need a second toolchain.
+rand_core = { version = "0.6", features = ["getrandom"] }
 hound = "3.5"
 libloading = "0.8"
 rubato = "0.15"

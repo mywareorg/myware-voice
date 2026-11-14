@@ -190,6 +190,12 @@ pub fn model_dir() -> Result<PathBuf> {
     Ok(data_dir()?.join("models"))
 }
 
+/// The signed licence, if one is installed. Data, not configuration: it is
+/// something the user was given, not something they edit.
+pub fn licence_file() -> Result<PathBuf> {
+    Ok(data_dir()?.join("licence"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
