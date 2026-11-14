@@ -1,4 +1,13 @@
-# Cross-build the Windows executable on a Linux runner.
+# Two jobs, because they prove different things.
+#
+# `check` compiles every workspace member on the host: formatting, lints, and the
+# settings window, which no test builds and which would otherwise rot against its
+# `hippo-ui` dependency. It also type-checks the Windows target, which catches
+# `cfg(windows)` code that the GNU cross-build links but a MSVC user would hit
+# first. `check` does not link, so the missing linker on a Linux runner does not
+# matter, and `build.rs` is a no-op off Windows by design.
+#
+# `windows-cross` cross-builds the shipped Windows executable on a Linux runner.
 #
 # All Windows dependencies are pure Rust or windows-sys, so mingw can link the
 # binary. What this proves: the Windows target compiles and links reproducibly,
@@ -6,7 +15,31 @@
 # does not lean on the mingw runtime DLLs. What it cannot prove: that the sherpa
 # DLLs load, that WASAPI capture works, or that SendInput reaches a window.
 stages:
+  - check
   - build
+
+check:
+  stage: check
+  image: rust:1-bookworm
+  interruptible: true
+  cache:
+    key: check
+    paths:
+      - /usr/local/cargo/registry/
+  script:
+    - apt-get update
+    # The settings window pulls iced, which wants xkbcommon and the Wayland
+    # client libraries at build time; cpal wants ALSA on the host.
+    - apt-get install -y --no-install-recommends pkg-config libasound2-dev libxkbcommon-dev libwayland-dev
+    - rustup component add rustfmt clippy
+    - rustup target add x86_64-pc-windows-msvc
+    - cargo fmt --all --check
+    # `-D warnings` is the point: without it this job reports drift nobody acts on.
+    - cargo clippy --workspace --all-targets -- -D warnings
+    # The settings window depends on `hippo-ui` by pinned rev, not by branch, so
+    # this can only break when the rev is bumped — which is when it should.
+    - cargo check -p hippo-voice-settings
+    - cargo check -p hippo-voice --target x86_64-pc-windows-msvc
 
 windows-cross:
   stage: build

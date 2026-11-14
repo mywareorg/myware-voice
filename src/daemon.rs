@@ -1002,10 +1002,8 @@ impl Daemon {
         }
         let idle = self.last_activity.elapsed() >= Duration::from_secs(minutes as u64 * 60);
         let phase = self.status.lock().map(|s| s.phase).unwrap_or(Phase::Idle);
-        if idle && phase == Phase::Idle {
-            if self.jobs.send(DecodeJob::Unload).is_ok() {
-                self.unloaded = true;
-            }
+        if idle && phase == Phase::Idle && self.jobs.send(DecodeJob::Unload).is_ok() {
+            self.unloaded = true;
         }
     }
 

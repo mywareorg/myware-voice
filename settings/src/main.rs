@@ -85,6 +85,9 @@ enum Message {
     ToggleHistory,
     ToggleTrailing,
     Refresh,
+    /// Only the Windows subscription polls for a pane request; elsewhere the
+    /// subscription is empty and this variant is never built.
+    #[cfg_attr(not(windows), allow(dead_code))]
     PollRequest,
     Copy(usize),
     ClearHistory,
