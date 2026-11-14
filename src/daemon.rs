@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::audio;
@@ -493,6 +493,13 @@ impl Daemon {
         if let Some(config) = self.pending_config.take() {
             self.apply_config(config);
         }
+        // Refuse before the microphone opens, not after the user has finished
+        // talking: without `wl-copy` there is no way for a transcript to leave
+        // the daemon, so recording would be a promise it cannot keep. The reason
+        // reaches the user through the failure path.
+        if let Some(problem) = inject::unavailable() {
+            bail!("{problem}");
+        }
         let recorder = Recorder::start(self.config.device.as_deref())?;
         let device = recorder.device().to_string();
         // Bumping the generation is what cancels a decode that is still running.
@@ -920,10 +927,7 @@ impl Daemon {
     fn deliver_stream(&mut self, text: &str, final_chunk: bool) -> Result<()> {
         let now = inject::focus();
         if !same_focus(self.stream_focus.as_ref(), now.as_ref()) {
-            inject::notify(
-                "Streaming stopped",
-                "Focus changed; the rest was not pasted",
-            );
+            inject::notify("Streaming stopped", &focus_changed_message(now.is_some()));
             return Err(anyhow!("focus changed; streaming stopped"));
         }
 
@@ -1029,7 +1033,10 @@ impl Daemon {
 
         let focus_now = inject::focus();
         if !same_focus(self.focus.as_ref(), focus_now.as_ref()) {
-            inject::notify("Transcript copied", "Focus changed; paste it yourself");
+            inject::notify(
+                "Transcript copied",
+                &focus_changed_message(focus_now.is_some()),
+            );
             self.set(Phase::Idle);
             return Ok(());
         }
@@ -1216,10 +1223,26 @@ impl Daemon {
 /// there is worse than not pasting. If focus was never readable there is nothing
 /// to compare, so the paste proceeds; if it was readable at stop but is not now,
 /// it does not.
+/// What to tell the user when the paste did not happen.
+///
+/// Two different situations that both end in "copied, not pasted": the window
+/// moved, or this desktop cannot say what the focused window is. The second one
+/// is worth naming, because the fix is a compositor the daemon can read.
+fn focus_changed_message(readable: bool) -> String {
+    if readable {
+        "Focus changed; paste it yourself".to_string()
+    } else {
+        "Could not read the focused window; paste it yourself".to_string()
+    }
+}
+
 fn same_focus(captured: Option<&Focus>, now: Option<&Focus>) -> bool {
-    match captured {
-        None => true,
-        Some(captured) => now.is_some_and(|now| captured == now),
+    match (captured, now) {
+        (Some(captured), Some(now)) => captured == now,
+        // A window that could not be read is not a window that can be trusted.
+        // Pasting blind is how a transcript ends up in whichever window happened
+        // to have focus; it is already on the clipboard, so copy and say so.
+        _ => false,
     }
 }
 
@@ -1839,6 +1862,15 @@ mod focus_tests {
         Focus {
             app_id: app.to_string(),
             title: "window".to_string(),
+            window_id: Some("1".to_string()),
+        }
+    }
+
+    fn at_window(app: &str, window: &str, title: &str) -> Focus {
+        Focus {
+            app_id: app.to_string(),
+            title: title.to_string(),
+            window_id: Some(window.to_string()),
         }
     }
 
@@ -1853,10 +1885,26 @@ mod focus_tests {
     }
 
     #[test]
-    fn focus_we_could_never_read_still_pastes() {
-        // No compositor API: there is nothing to compare, and refusing would
-        // make the app useless on that desktop.
-        assert!(same_focus(None, None));
+    fn a_title_change_is_not_a_focus_change() {
+        // A shell prompt rewrites the title after every command; refusing the
+        // paste because of that was the reason this comparison changed.
+        let before = at_window("foot", "7", "~/repos");
+        let after = at_window("foot", "7", "~/repos (git)-[main]");
+        assert!(same_focus(Some(&before), Some(&after)));
+    }
+
+    #[test]
+    fn a_second_window_of_the_same_application_is_a_focus_change() {
+        let left = at_window("editor", "7", "notes");
+        let right = at_window("editor", "9", "notes");
+        assert!(!same_focus(Some(&left), Some(&right)));
+    }
+
+    #[test]
+    fn a_window_we_could_not_read_is_not_pasted_into() {
+        // No provider, or the compositor did not answer. Pasting blind is how a
+        // transcript lands in a chat window; the clipboard already has it.
+        assert!(!same_focus(None, None));
     }
 
     #[test]

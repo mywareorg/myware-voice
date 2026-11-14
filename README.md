@@ -35,8 +35,9 @@ cargo build
 ./target/debug/hippo-voice transcribe some.wav
 ```
 
-`doctor` prints the resolved runtime, the model, the session type, and which of
-`wl-copy`, `wtype`, `ydotool` and `notify-send` it found.
+`doctor` prints the resolved runtime, the model, the session type, whether the
+focused window can be read, and which of `wl-copy`, `wtype`, `ydotool` and
+`notify-send` it found.
 
 `transcribe --json` reports `t_prepare`, `t_load`, `t_decode`, RTF and peak RSS,
 which is how the warm-model decision is measured rather than guessed.
@@ -97,7 +98,7 @@ loads a fresh one — instead of wedging the daemon in `decoding` for the sessio
 
 ## Testing
 
-Five environment variables let the whole pipeline run with no microphone and no
+Six environment variables let the whole pipeline run with no microphone and no
 model, which is how `tests/daemon.rs` drives a real daemon over its real socket
 on CI:
 
@@ -110,6 +111,8 @@ on CI:
 - `HIPPO_VOICE_FAKE_DECODE` — break the fake decoder on purpose: `panic` fails the
   first decode, which is how the supervision around it is tested; `slow` delays
   every decode so a second press arrives mid-decode.
+- `HIPPO_VOICE_FAKE_FOCUS` — the focused window as `app:window`, so a test does
+  not need a compositor that can answer.
 
 ## Measured
 
@@ -165,6 +168,24 @@ wl-copy --trim-newline <<< "hello"; ydotool key 29:1 47:1 47:0 29:0
 
 Terminals get `ctrl+shift+v` rather than `ctrl+v`, and a trailing newline is
 never copied, because a newline pasted into a terminal executes a command.
+
+`wl-copy` is not optional: every delivery path starts with it, including the
+copy-only one. Without it the daemon refuses the capture and says why, instead of
+recording into a microphone that cannot produce anything.
+
+The paste only happens if the daemon can tell it is still in the window the
+capture started in. Two things are compared: the application and the window, not
+the title. A title is rewritten constantly for reasons the user did not cause —
+a shell prompt after every command, an editor's dirty marker on the first
+keystroke — and comparing it refused pastes that should have landed. Two windows
+of the same application are still a change of focus.
+
+Which window is focused comes from the compositor, chosen by the variable it
+exports: `swaymsg` under `SWAYSOCK`, `hyprctl` under
+`HYPRLAND_INSTANCE_SIGNATURE`. Anywhere else the daemon cannot see the focused
+window, so it copies the transcript and tells you: pasting blind is how a
+transcript lands in a chat window instead of the one you were typing in. That is
+the cost of not supporting X11 yet, and it is visible rather than silent.
 
 ## Settings window
 

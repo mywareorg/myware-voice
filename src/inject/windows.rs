@@ -42,6 +42,12 @@ pub fn resolve(method: PasteMethod) -> PasteMethod {
     method
 }
 
+/// Nothing is missing: the clipboard and `SendInput` are the OS, not a tool the
+/// user has to install. Kept so the daemon can ask one question on both targets.
+pub fn unavailable() -> Option<String> {
+    None
+}
+
 /// Put `text` on the clipboard, without a trailing newline.
 pub fn copy(text: &str) -> Result<()> {
     let text = text.trim_end_matches(['\n', '\r']);

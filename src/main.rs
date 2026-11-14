@@ -310,6 +310,16 @@ fn doctor() -> Result<()> {
     }
 
     println!("session       {}", session_name());
+    // Load-bearing now that an unreadable window means "copied, not pasted": the
+    // user needs to know whether this desktop can say what is focused.
+    println!(
+        "focus         {}",
+        if inject::focus().is_some() {
+            "readable"
+        } else {
+            "not readable: transcripts are copied, not pasted"
+        }
+    );
 
     match capture::input_devices() {
         Ok(devices) if !devices.is_empty() => {
@@ -447,6 +457,8 @@ fn session_name() -> &'static str {
         "windows (WASAPI)"
     } else if std::env::var_os("SWAYSOCK").is_some() {
         "sway (Wayland)"
+    } else if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        "Hyprland (Wayland)"
     } else if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         "Wayland"
     } else if std::env::var_os("DISPLAY").is_some() {

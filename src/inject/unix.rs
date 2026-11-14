@@ -14,11 +14,30 @@ use anyhow::{anyhow, bail, Context, Result};
 use super::have;
 use crate::config::PasteMethod;
 
-/// What the focused window looks like, as far as sway will say.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the focused window looks like, as far as the compositor will say.
+#[derive(Debug, Clone, Eq)]
 pub struct Focus {
+    /// Application id on sway/Wayland, class on X11-flavoured trees.
     pub app_id: String,
+    /// The window title. Kept for logs and diagnostics only: it is not part of a
+    /// window's identity.
     pub title: String,
+    /// Provider-defined window identity: the sway node id, or the Hyprland
+    /// address. Two windows of the same application differ here.
+    pub window_id: Option<String>,
+}
+
+impl PartialEq for Focus {
+    /// Identity is the window, not its contents.
+    ///
+    /// Titles change constantly for reasons the user cannot see: a shell prompt
+    /// after every command, an editor's dirty marker on the first keystroke. When
+    /// they were compared, a normal pause between pressing stop and the paste
+    /// arriving looked like the user had switched windows, so the paste was
+    /// refused. Comparing the window itself is what "did focus move" means.
+    fn eq(&self, other: &Self) -> bool {
+        self.app_id == other.app_id && self.window_id == other.window_id
+    }
 }
 
 impl Focus {
@@ -131,8 +150,109 @@ pub fn paste(method: PasteMethod, focus: Option<&Focus>) -> Result<PasteMethod> 
     Ok(method)
 }
 
-/// The focused window according to sway.
+/// Which compositor can answer "what is focused".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Session {
+    Sway,
+    Hyprland,
+    /// X11, or a Wayland compositor with no focus protocol the daemon can read.
+    Unknown,
+}
+
+/// Identify the session from the variables the compositor exports.
+///
+/// The variable, not the binary: `swaymsg` can be installed on a Hyprland
+/// machine and would answer with its own error, and probing a socket that is not
+/// there costs a process spawn every time a capture ends.
+fn session() -> Session {
+    if std::env::var_os("SWAYSOCK").is_some() {
+        Session::Sway
+    } else if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        Session::Hyprland
+    } else {
+        Session::Unknown
+    }
+}
+
+/// Why a transcript could not be delivered at all, if it could not.
+///
+/// Every delivery path starts with `wl-copy`, including the copy-only one, so
+/// without it there is nothing to paste and nothing to fall back to. The daemon
+/// asks before it records: refusing up front is honest, and it means the user is
+/// not left talking into a microphone that produces nothing.
+pub fn unavailable() -> Option<String> {
+    // The fake-delivery seam skips the clipboard and the paste entirely, which is
+    // how the state machine is tested on a machine that has neither. Asking for
+    // tools that run would never be used would fail every such test.
+    if std::env::var_os("HIPPO_VOICE_FAKE_DELIVERY").is_some() {
+        return None;
+    }
+    if have("wl-copy") {
+        None
+    } else {
+        Some(
+            "wl-copy is not installed; it is how a transcript leaves the daemon \
+             (install wl-clipboard)"
+                .to_string(),
+        )
+    }
+}
+
+/// The focused window, from whichever compositor can say.
 pub fn focus() -> Option<Focus> {
+    if let Some(spec) = std::env::var_os("HIPPO_VOICE_FAKE_FOCUS") {
+        return Some(parse_fake(&spec.to_string_lossy()));
+    }
+    match session() {
+        Session::Sway => sway_focus(),
+        Session::Hyprland => hyprland_focus(),
+        Session::Unknown => None,
+    }
+}
+
+/// `app_id:window_id`, the form `HIPPO_VOICE_FAKE_FOCUS` takes. A spec without a
+/// colon has no window id, which is the "provider that only knows the
+/// application" case.
+fn parse_fake(spec: &str) -> Focus {
+    let (app_id, window_id) = match spec.split_once(':') {
+        Some((app_id, window_id)) => (app_id, Some(window_id.to_string())),
+        None => (spec, None),
+    };
+    Focus {
+        app_id: app_id.to_string(),
+        title: String::new(),
+        window_id,
+    }
+}
+
+/// The focused window according to Hyprland.
+fn hyprland_focus() -> Option<Focus> {
+    let output = Command::new("hyprctl")
+        .args(["activewindow", "-j"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let window: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    // An empty object means nothing is focused, which is not an error.
+    let app_id = window.get("class").and_then(|value| value.as_str())?;
+    Some(Focus {
+        app_id: app_id.to_string(),
+        title: window
+            .get("title")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        window_id: window
+            .get("address")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+    })
+}
+
+/// The focused window according to sway.
+fn sway_focus() -> Option<Focus> {
     let output = Command::new("swaymsg")
         .args(["-t", "get_tree", "--raw"])
         .output()
@@ -157,7 +277,15 @@ pub fn focus() -> Option<Focus> {
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .to_string();
-    Some(Focus { app_id, title })
+    let window_id = node
+        .get("id")
+        .and_then(|value| value.as_u64())
+        .map(|id| id.to_string());
+    Some(Focus {
+        app_id,
+        title,
+        window_id,
+    })
 }
 
 fn find_focused(node: &serde_json::Value) -> Option<&serde_json::Value> {
@@ -195,6 +323,7 @@ mod tests {
         let term = Focus {
             app_id: "foot".into(),
             title: "~".into(),
+            window_id: Some("1".into()),
         };
         assert!(term.is_terminal());
         let argv = paste_argv(PasteMethod::Wtype, true).unwrap();
@@ -208,8 +337,22 @@ mod tests {
         let focus = Focus {
             app_id: "firefox".into(),
             title: "Inbox".into(),
+            window_id: Some("2".into()),
         };
         assert!(!focus.is_terminal());
+    }
+
+    #[test]
+    fn the_fake_focus_spec_carries_the_window_identity() {
+        let focus = parse_fake("foot:7");
+        assert_eq!(focus.app_id, "foot");
+        assert_eq!(focus.window_id.as_deref(), Some("7"));
+
+        // No colon: a provider that knows the application but not the window.
+        let vague = parse_fake("foot");
+        assert_eq!(vague.app_id, "foot");
+        assert_eq!(vague.window_id, None);
+        assert_ne!(vague, parse_fake("foot:1"));
     }
 
     #[test]
