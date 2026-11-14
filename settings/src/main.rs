@@ -14,7 +14,7 @@ use hippo_ui::rows::{settings_divider, settings_row, switch_row};
 use hippo_ui::styles::*;
 use hippo_ui::tokens::{self, AppTheme, Scheme};
 use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input};
-use iced::{Element, Length, Task};
+use iced::{font, Element, Font, Length, Task};
 use std::sync::OnceLock;
 #[cfg(windows)]
 use std::time::Duration;
@@ -25,9 +25,10 @@ const CHUNKS: [&str; 4] = ["10 s", "15 s", "20 s", "30 s"];
 const STREAM_CHUNKS: [&str; 5] = ["1.0 s", "1.5 s", "2.0 s", "3.0 s", "5.0 s"];
 const STREAM_SEGMENTS: [&str; 4] = ["5 s", "8 s", "12 s", "20 s"];
 
-/// The header mark, in logical pixels. It sits inside the control height beside
-/// the title, and 128 px of source cover a 4x display.
-const HEADER_LOGO_SIZE: f32 = 28.0;
+/// The header mark, in logical pixels, matching the size Hippo Transcribe uses so
+/// the two windows read as one family. The source is 128 px, which is sharp at
+/// 1x and marginal at 2x.
+const HEADER_LOGO_SIZE: f32 = 67.0;
 
 fn main() -> iced::Result {
     // The tray starts this with CREATE_NO_WINDOW, so an iced failure would
@@ -305,12 +306,21 @@ impl Settings {
             iced::widget::image(header_logo())
                 .width(Length::Fixed(HEADER_LOGO_SIZE))
                 .height(Length::Fixed(HEADER_LOGO_SIZE)),
-            text("Hippo Dictate").size(tokens::TEXT_XL),
+            column![
+                text("Hippo Dictate").size(tokens::TEXT_XL).font(Font {
+                    weight: font::Weight::Bold,
+                    ..Font::DEFAULT
+                }),
+                text("Private Offline Dictation")
+                    .size(tokens::TEXT_XS)
+                    .color(scheme.muted),
+            ]
+            .spacing(tokens::SPACE_2XS),
             iced::widget::horizontal_space(),
             pick_list(AppTheme::ALL.as_slice(), Some(self.mode), Message::Theme)
                 .style(pill_pick(scheme)),
         ]
-        .spacing(tokens::SPACE_LG)
+        .spacing(tokens::SPACE_SM)
         .align_y(iced::Alignment::Center);
 
         let tabs = row![
