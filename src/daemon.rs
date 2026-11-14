@@ -1582,8 +1582,16 @@ pub fn run(model_dir: PathBuf) -> Result<()> {
         }
     }
 
+    // A tray is a convenience: on Linux its absence (no StatusNotifier host) must
+    // not stop the daemon, which is why that implementation logs instead of
+    // failing. On Windows the icon is also the only way back to the window, so a
+    // failure there is still fatal.
     #[cfg(windows)]
     crate::tray::spawn(events_tx.clone())?;
+    #[cfg(target_os = "linux")]
+    {
+        let _ = crate::tray::spawn(events_tx.clone());
+    }
 
     #[cfg(windows)]
     crate::overlay::spawn(Arc::clone(&status))?;

@@ -349,6 +349,28 @@ window, so it copies the transcript and tells you: pasting blind is how a
 transcript lands in a chat window instead of the one you were typing in. That is
 the cost of not supporting X11 yet, and it is visible rather than silent.
 
+## Tray
+
+The daemon publishes a tray icon: on Linux a StatusNotifierItem, which waybar's
+`tray` module and every GTK shell host; on Windows a notification-area icon. It
+carries the same menu on both — **Open settings…**, **Recent transcripts**,
+**Toggle dictation**, **Quit** — and a left click opens the settings window.
+
+The icon is looked up by name in the theme, so it appears once `install.sh` has
+put the hicolor tree in place; a checkout that has installed nothing shows the
+host's fallback icon instead. The menu is the point, not the picture.
+
+Nothing about it is load-bearing. A session with no tray host, a bus that is not
+there, or a bar that starts after the daemon all mean "no icon", not "no
+dictation": the daemon retries for a few seconds in the background and then
+gives up quietly, because a daemon that refused to start without a tray would be
+a worse bug than a missing menu.
+
+Linux has no single-instance handshake for the settings window, so a second click
+opens a second window. That is the honest behaviour rather than a menu item that
+silently does nothing; the window's own "already open" check is Windows-only,
+where the tray was the first way in.
+
 ## Settings window
 
 `hippo-dictate-settings` is a separate binary, built against `hippo-ui`, that edits

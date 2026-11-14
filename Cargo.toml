@@ -44,6 +44,11 @@ serde_json = "1"
 sha2 = "0.10"
 toml = "0.8"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The tray icon: a StatusNotifierItem, which is what waybar and every GTK shell
+# host. The blocking API keeps an async D-Bus client off the daemon's threads.
+ksni = { version = "0.3", features = ["blocking"] }
+
 [target.'cfg(windows)'.dependencies]
 arboard = "3"
 enigo = "0.2"

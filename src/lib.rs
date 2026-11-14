@@ -22,5 +22,5 @@ pub mod sherpa;
 pub mod text;
 pub mod tone;
 pub mod transport;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 pub mod tray;
