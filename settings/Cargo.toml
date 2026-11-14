@@ -24,6 +24,10 @@ iced = { version = "0.13", features = ["tokio", "advanced", "image-without-codec
 # than enabling every codec iced would pull for `image`.
 image = { version = "0.25", default-features = false, features = ["png"] }
 toml = "0.8"
+# Editing the config in place: `toml` writes a whole document and cannot carry
+# comments or keys this window does not know about, which would silently drop a
+# hand-edit. Already in the tree (via `toml`), so this adds no download.
+toml_edit = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

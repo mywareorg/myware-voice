@@ -36,9 +36,10 @@ check:
     - cargo fmt --all --check
     # `-D warnings` is the point: without it this job reports drift nobody acts on.
     - cargo clippy --workspace --all-targets -- -D warnings
-    # The settings window depends on `hippo-ui` by pinned rev, not by branch, so
-    # this can only break when the rev is bumped — which is when it should.
-    - cargo check -p hippo-voice-settings
+    # Host tests, including the settings window's. It depends on `hippo-ui` by
+    # pinned rev rather than by branch, so this can only break when the rev is
+    # bumped — which is when it should.
+    - cargo test --workspace
     - cargo check -p hippo-voice --target x86_64-pc-windows-msvc
 
 windows-cross:

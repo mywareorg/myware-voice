@@ -1,8 +1,9 @@
 //! The visible surface of an otherwise invisible app: settings and history.
 //!
 //! It reads `config.toml` and `history.tsv` and writes only the former; it never
-//! talks to the running daemon, so there is no reload protocol to keep in step and
-//! a window cannot wedge a recording. The next capture reads the file it wrote.
+//! talks to the running daemon, so a window cannot wedge a recording. The daemon
+//! watches the file and applies what it finds on its next capture, which is why
+//! there is no reload protocol to keep in step.
 
 use hippo_ui::rows::{settings_divider, settings_row, switch_row};
 use hippo_ui::styles::*;
@@ -288,15 +289,12 @@ impl Settings {
                 return;
             }
         }
-        match toml::to_string_pretty(&self.config) {
-            Ok(text) => match std::fs::write(&path, text) {
-                Ok(()) => {
-                    self.saved = true;
-                    self.error = None;
-                }
-                Err(error) => self.error = Some(error.to_string()),
-            },
-            Err(error) => self.error = Some(error.to_string()),
+        match write_config(&path, &self.config) {
+            Ok(()) => {
+                self.saved = true;
+                self.error = None;
+            }
+            Err(error) => self.error = Some(error),
         }
     }
 
@@ -338,7 +336,11 @@ impl Settings {
             );
         }
         if self.saved {
-            page = page.push(text("Saved").size(tokens::TEXT_SM).color(scheme.green));
+            page = page.push(
+                text("Saved. Everything except the hotkeys applies on the next capture.")
+                    .size(tokens::TEXT_SM)
+                    .color(scheme.green),
+            );
         }
 
         container(
@@ -698,6 +700,38 @@ fn load_entries(config: &Config) -> Vec<history::Entry> {
     history::recent(config.history_days).unwrap_or_default()
 }
 
+/// Write the settings, keeping whatever this window does not know about.
+///
+/// `Config` has no field for a key a future version adds, and serialising it over
+/// the file would delete that key. Editing the document in place touches only the
+/// fields this window owns, and leaves the rest of the file — including the
+/// comments around keys it never touches — as the user wrote it.
+///
+/// `device` is the one field whose "unset" state has to be written as an absence:
+/// `None` means the host default, so the key is removed rather than left behind.
+fn write_config(path: &std::path::Path, config: &Config) -> Result<(), String> {
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    // A file that will not parse is replaced rather than preserved: the window is
+    // showing the settings the user can keep, and the daemon falls back to the
+    // defaults for the same reason.
+    let mut document = existing
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap_or_else(|_| toml_edit::DocumentMut::new());
+
+    let ours: toml_edit::DocumentMut = toml::to_string_pretty(config)
+        .map_err(|error| error.to_string())?
+        .parse()
+        .map_err(|error: toml_edit::TomlError| error.to_string())?;
+    for (key, item) in ours.iter() {
+        document[key] = item.clone();
+    }
+    if config.device.is_none() {
+        document.remove("device");
+    }
+
+    std::fs::write(path, document.to_string()).map_err(|error| error.to_string())
+}
+
 fn tab<'a>(label: &'a str, pane: Pane, current: Pane, scheme: Scheme) -> Element<'a, Message> {
     button(text(label).size(16.0))
         .padding([0, 12])
@@ -735,4 +769,52 @@ fn window_icon() -> Option<iced::window::Icon> {
         .into_rgba8();
     let (width, height) = image.dimensions();
     iced::window::icon::from_rgba(image.into_raw(), width, height).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saving_keeps_what_this_window_does_not_own() {
+        let path =
+            std::env::temp_dir().join(format!("hippo-voice-settings-{}.toml", std::process::id()));
+        // A comment above a key the window never writes, and a key from a version
+        // that has not been released yet: both have to survive a save.
+        std::fs::write(
+            &path,
+            "# hand edit\nfuture_key = 1\npaste = \"auto\"\ndevice = \"USB Mic\"\n",
+        )
+        .expect("write the fixture");
+
+        let config = Config {
+            paste: PasteMethod::Ydotool,
+            ..Config::default()
+        };
+        write_config(&path, &config).expect("save");
+
+        let text = std::fs::read_to_string(&path).expect("read back");
+        assert!(
+            text.contains("# hand edit"),
+            "a comment was dropped: {text}"
+        );
+        assert!(
+            text.contains("future_key = 1"),
+            "an unknown key was dropped: {text}"
+        );
+        assert!(
+            text.contains("paste = \"ydotool\""),
+            "the edited value was not written: {text}"
+        );
+        assert!(
+            !text.contains("device ="),
+            "the host default was selected but the old device stayed in the file: {text}"
+        );
+
+        let back: Config = toml::from_str(&text).expect("parse the saved file");
+        assert_eq!(back.paste, PasteMethod::Ydotool);
+        assert_eq!(back.device, None);
+
+        let _ = std::fs::remove_file(&path);
+    }
 }
