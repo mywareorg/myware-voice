@@ -121,8 +121,8 @@ impl Recorder {
 
     /// Normalised magnitude for each logarithmically spaced frequency band.
     ///
-    /// A 2048-sample Hann-windowed DFT at each band centre is enough for a
-    /// 10 Hz meter and costs far less than pulling in an FFT crate for 44
+    /// A 4096-sample Hann-windowed DFT at each band centre is enough for a
+    /// 10 Hz meter and costs far less than pulling in an FFT crate for 100
     /// columns. The result is in 0..1 with a -60 dB floor, which is what the
     /// overlay draws; smoothing belongs to the display so a new capture starts
     /// from zero.
@@ -132,7 +132,7 @@ impl Recorder {
         };
         let channels = self.channels.max(1);
         let frames = samples.len() / channels;
-        let window = frames.min(2048);
+        let window = frames.min(4096);
         if count == 0 || window < 64 {
             return Vec::new();
         }
@@ -153,9 +153,10 @@ impl Recorder {
             .collect();
 
         let rate = self.rate.max(1) as f32;
-        // 50 Hz keeps the bottom of a male voice (and room rumble) in the
-        // display; the 2048-sample window gives ~23 Hz bins at 48 kHz.
-        let low = 50.0f32.min(rate * 0.1);
+        // 30 Hz shifts the window below the old 50 Hz floor while the 4096
+        // sample window gives ~12 Hz bins at 48 kHz, so the first columns have
+        // something real to draw.
+        let low = 30.0f32.min(rate * 0.05);
         let high = (rate * 0.5).min(8000.0).max(low * 2.0);
         let norm = window as f32 * 0.25;
 
@@ -172,7 +173,7 @@ impl Recorder {
                     real += weighted * cos_phase;
                     imaginary += weighted * sin_phase;
                     // Advance by omega without a trig call per sample. Over
-                    // 1024 steps the drift is far below the display resolution.
+                    // 4096 steps the drift is far below the display resolution.
                     let next_sin = sin_phase * step_cos + cos_phase * step_sin;
                     let next_cos = cos_phase * step_cos - sin_phase * step_sin;
                     sin_phase = next_sin;
