@@ -353,7 +353,12 @@ the cost of not supporting X11 yet, and it is visible rather than silent.
 
 While a capture is running the daemon shows a small panel in the top right of the
 focused screen: a status dot and a symmetric meter of what the microphone is
-hearing. Green is listening for a phrase, blue is committing them as you speak.
+hearing.
+
+The dot is the **mode**, not the level: green is ordinary dictation, where the
+transcript is pasted when you stop, and blue is streaming, where phrases are
+committed as you speak. It grows with the input level so it also shows the
+microphone is being heard; a mode light that never moved would look broken.
 
 On Linux it is a `wlr-layer-shell` surface drawn by `hippo-dictate-overlay`, a
 small separate binary the daemon starts when the capture starts and stops when it

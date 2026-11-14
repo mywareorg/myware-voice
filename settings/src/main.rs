@@ -311,7 +311,7 @@ impl Settings {
                     weight: font::Weight::Bold,
                     ..Font::DEFAULT
                 }),
-                text("Private Offline Dictation")
+                text("HIPAA Inspired, Private Offline Dictation")
                     .size(tokens::TEXT_XS)
                     .color(scheme.muted),
             ]

@@ -140,12 +140,18 @@ impl Recorder {
         // Average the channels down to one waveform, same as the recognizer's
         // view, but keep only the most recent window.
         let from = (frames - window) * channels;
-        let mono: Vec<f32> = (0..window)
+        let mut mono: Vec<f32> = (0..window)
             .map(|index| {
                 let base = from + index * channels;
                 samples[base..base + channels].iter().sum::<f32>() / channels as f32
             })
             .collect();
+        // A band display cannot show a constant, so remove it even if the device
+        // still has some: otherwise it reads as a dead meter rather than a hum.
+        let mean = mono.iter().sum::<f32>() / mono.len() as f32;
+        for sample in &mut mono {
+            *sample -= mean;
+        }
         let hann: Vec<f32> = (0..window)
             .map(|index| {
                 0.5 - 0.5 * (2.0 * std::f32::consts::PI * index as f32 / (window - 1) as f32).cos()
@@ -204,7 +210,11 @@ impl Recorder {
         }
         let from = (frames - take) * channels;
         let window = &samples[from..];
-        let energy: f32 = window.iter().map(|sample| sample * sample).sum();
+        let mean = window.iter().sum::<f32>() / window.len().max(1) as f32;
+        let energy: f32 = window
+            .iter()
+            .map(|sample| (sample - mean) * (sample - mean))
+            .sum();
         (energy / window.len().max(1) as f32).sqrt()
     }
 
@@ -334,7 +344,8 @@ pub fn input_devices() -> Result<Vec<String>> {
 
 macro_rules! build_stream {
     ($device:expr, $config:expr, $ty:ty, $push:expr, $err:expr) => {{
-        let push = $push;
+        // `mut` because the callback now carries state: the DC blocker.
+        let mut push = $push;
         $device.build_input_stream(
             $config,
             move |data: &[$ty], _info: &cpal::InputCallbackInfo| push(data),
@@ -342,6 +353,46 @@ macro_rules! build_stream {
             None,
         )
     }};
+}
+
+/// A one-pole high-pass at a few hertz.
+///
+/// Some devices deliver a constant offset — this one arrives at -0.13, which is
+/// a sixth of the full scale and does nothing but waste headroom. It inflates the
+/// RMS the loudness normaliser sees, and it leaves the popup's meter sitting still
+/// because a constant is invisible to a band display.
+struct DcBlock {
+    channels: usize,
+    last_in: Vec<f32>,
+    last_out: Vec<f32>,
+    pole: f32,
+}
+
+impl DcBlock {
+    fn new(channels: usize, rate: u32) -> Self {
+        let channels = channels.max(1);
+        // Corner at 5 Hz: below anything a voice contains, above the drift.
+        let pole = 1.0 - 2.0 * std::f32::consts::PI * 5.0 / rate.max(1) as f32;
+        Self {
+            channels,
+            last_in: vec![0.0; channels],
+            last_out: vec![0.0; channels],
+            pole,
+        }
+    }
+
+    fn push<T: Into<f32> + Copy>(&mut self, data: &[T], out: &mut Vec<f32>) {
+        let channels = self.channels;
+        for frame in data.chunks(channels) {
+            for (channel, sample) in frame.iter().enumerate() {
+                let input = (*sample).into();
+                let filtered = input - self.last_in[channel] + self.pole * self.last_out[channel];
+                self.last_in[channel] = input;
+                self.last_out[channel] = filtered;
+                out.push(filtered);
+            }
+        }
+    }
 }
 
 fn build(
@@ -359,16 +410,19 @@ fn build(
         eprintln!("audio: {error}");
     };
 
+    let channels = config.channels as usize;
+    let rate = config.sample_rate.0;
     let stream = match format {
         SampleFormat::F32 => {
             let sink = Arc::clone(&buffer);
+            let mut dc = DcBlock::new(channels, rate);
             build_stream!(
                 device,
                 config,
                 f32,
                 move |data: &[f32]| {
                     if let Ok(mut samples) = sink.lock() {
-                        samples.extend_from_slice(data);
+                        dc.push(data, &mut samples);
                     }
                 },
                 err_callback
@@ -376,13 +430,18 @@ fn build(
         }
         SampleFormat::I16 => {
             let sink = Arc::clone(&buffer);
+            let mut dc = DcBlock::new(channels, rate);
+            // Reused across callbacks: nothing on the audio thread should allocate.
+            let mut scratch: Vec<f32> = Vec::new();
             build_stream!(
                 device,
                 config,
                 i16,
                 move |data: &[i16]| {
                     if let Ok(mut samples) = sink.lock() {
-                        samples.extend(data.iter().map(|s| *s as f32 / 32768.0));
+                        scratch.clear();
+                        scratch.extend(data.iter().map(|s| *s as f32 / 32768.0));
+                        dc.push(&scratch, &mut samples);
                     }
                 },
                 err_callback
@@ -390,13 +449,17 @@ fn build(
         }
         SampleFormat::U16 => {
             let sink = Arc::clone(&buffer);
+            let mut dc = DcBlock::new(channels, rate);
+            let mut scratch: Vec<f32> = Vec::new();
             build_stream!(
                 device,
                 config,
                 u16,
                 move |data: &[u16]| {
                     if let Ok(mut samples) = sink.lock() {
-                        samples.extend(data.iter().map(|s| (*s as f32 - 32768.0) / 32768.0));
+                        scratch.clear();
+                        scratch.extend(data.iter().map(|s| (*s as f32 - 32768.0) / 32768.0));
+                        dc.push(&scratch, &mut samples);
                     }
                 },
                 err_callback

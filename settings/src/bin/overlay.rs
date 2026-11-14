@@ -186,13 +186,17 @@ fn paint(canvas: &mut [u8], width: u32, height: u32, tick: &Tick) {
     };
 
     canvas.rounded_panel(radius);
-    // Green while waiting for a phrase, blue while streaming.
+    // The dot is the mode: green for spoken-and-pasted-when-you-stop, blue for
+    // streaming, where phrases are committed as you speak. It grows with the
+    // level so it also proves the microphone is being heard — a mode light that
+    // never moves looks like a broken one.
     let dot = if tick.streaming {
         (91, 155, 213)
     } else {
         (76, 175, 122)
     };
-    canvas.circle(18.0, 20.0, 5.0, dot);
+    let radius = 4.0 + 3.0 * tick.level.clamp(0.0, 1.0);
+    canvas.circle(18.0, 20.0, radius, dot);
 
     // A symmetric meter, so it reads as a waveform rather than a level bar: each
     // column grows above and below the centre line.
@@ -206,12 +210,16 @@ fn paint(canvas: &mut [u8], width: u32, height: u32, tick: &Tick) {
     let reach = ((bottom - top) / 2 - 2).max(2) as f32;
 
     for index in 0..BARS {
+        // A gamma curve, because most of a voice's energy sits in the bottom
+        // third of a dB scale: without it the meter reads as a flat line with a
+        // couple of tall columns at the low end.
         let value = tick
             .bands
             .get(index)
             .copied()
             .unwrap_or(if index == 0 { tick.level } else { 0.0 })
-            .clamp(0.0, 1.0);
+            .clamp(0.0, 1.0)
+            .powf(0.65);
         let half = (value * reach).max(1.0);
         let x = left + index as i32 * (bar + gap);
         // Brighter with amplitude, so the meter reads at a glance.
