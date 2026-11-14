@@ -147,9 +147,17 @@ impl Listener {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let mut file = std::fs::File::create(&path)?;
-        writeln!(file, "{port}")?;
-        writeln!(file, "{token}")?;
+        // Written under a temporary name and renamed into place. A client that
+        // reads while this runs would otherwise see a port with no token yet,
+        // conclude no daemon is listening, and start a second one on a fresh port.
+        let temporary = path.with_extension("tmp");
+        {
+            let mut file = std::fs::File::create(&temporary)?;
+            writeln!(file, "{port}")?;
+            writeln!(file, "{token}")?;
+            file.sync_all()?;
+        }
+        std::fs::rename(&temporary, &path)?;
 
         Ok(Self { tcp, token })
     }

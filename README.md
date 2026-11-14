@@ -290,6 +290,15 @@ of saved. Everything except the hotkeys takes effect without a restart — see
 It is the second consumer of `hippo-ui` and the reason that library has a
 gallery and a style snapshot.
 
+## The socket
+
+`hippo-voice toggle` is a client of the daemon, over a Unix socket in
+`$XDG_RUNTIME_DIR/hippo-voice/` (a loopback port with a per-run token on Windows).
+Every request carries the wire version and every reply reports the daemon's, so a
+client and a daemon from different builds refuse each other with a sentence
+instead of reading a field that has changed meaning. Adding a field does not
+change the version; changing one does.
+
 ## Licensing
 
 Everything that dictates is free: the daemon, both models, the settings window,

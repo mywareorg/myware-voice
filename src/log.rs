@@ -76,7 +76,7 @@ pub fn write(message: &str) {
         return;
     }
     if std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0) > MAX_LOG_BYTES {
-        let _ = std::fs::write(&path, b"");
+        rotate(&path);
     }
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
@@ -109,7 +109,7 @@ pub fn error(message: &str) {
     let Some(path) = error_file() else { return };
     let mut fresh = !path.exists();
     if std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0) > MAX_ERROR_BYTES {
-        let _ = std::fs::write(&path, b"");
+        rotate(&path);
         fresh = true;
     }
     let Ok(mut file) = std::fs::OpenOptions::new()
@@ -148,6 +148,26 @@ pub fn install_panic_hook() {
     }));
 }
 
+/// Move a full log aside instead of emptying it.
+///
+/// Truncating throws away exactly the lines a bug report needs — everything
+/// before the crash. One generation is kept (`log.1`), so a runaway daemon still
+/// cannot fill a disk while the evidence survives.
+fn rotate(path: &Path) {
+    let _ = std::fs::rename(path, rotated(path));
+}
+
+/// `log` becomes `log.1`; `hippo-voice-error.log` becomes
+/// `hippo-voice-error.log.1`, which is what someone looking for it would guess.
+fn rotated(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_default();
+    name.push(".1");
+    path.with_file_name(name)
+}
+
 /// The last `count` lines of the log.
 pub fn tail(count: usize) -> Result<Vec<String>> {
     let path = path()?;
@@ -172,6 +192,23 @@ pub fn tail(count: usize) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_full_log_is_rotated_not_emptied() {
+        let root = std::env::temp_dir().join(format!("hippo-voice-rotate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("log");
+        std::fs::write(&path, "the line before the crash\n").unwrap();
+
+        rotate(&path);
+
+        assert!(!path.exists(), "the live log was not moved aside");
+        let kept = std::fs::read_to_string(rotated(&path)).expect("the rotated log");
+        assert_eq!(kept, "the line before the crash\n");
+        assert_eq!(rotated(&path), root.join("log.1"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn the_civil_conversion_matches_known_dates() {

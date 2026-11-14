@@ -6,6 +6,7 @@
 //! socket, the detached spawn path and the process lifecycle together.
 #![cfg(unix)]
 
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -499,5 +500,47 @@ fn a_transcript_never_reaches_the_log() {
     assert_eq!(
         timings.copy_ms, None,
         "a fake delivery reported a clipboard span"
+    );
+}
+
+#[test]
+fn a_client_from_another_build_is_refused_and_told_why() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let _fixture = Fixture::start(
+        "protocol",
+        "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("hello from the test"),
+        &[],
+    );
+
+    // Raw, because `daemon::request` always sends this build's version: the point
+    // is a client from a build that speaks something else.
+    let mut stream = hippo_voice::transport::connect().expect("connect");
+    let request = serde_json::json!({ "cmd": "status", "protocol": 99 });
+    serde_json::to_writer(&mut stream, &request).expect("write request");
+    stream.write_all(b"\n").expect("newline");
+    let mut line = String::new();
+    BufReader::new(stream)
+        .read_line(&mut line)
+        .expect("read the reply");
+    let reply: hippo_voice::daemon::Reply = serde_json::from_str(&line).expect("parse the reply");
+
+    assert!(!reply.ok, "a mismatched protocol was served");
+    assert_eq!(
+        reply.protocol,
+        Some(1),
+        "the daemon did not say its version"
+    );
+    let reason = reply.error.expect("no reason given");
+    assert!(reason.contains("protocol"), "{reason}");
+    assert!(
+        reply.phase.is_none(),
+        "the refused command was executed anyway"
+    );
+
+    // And the daemon is still usable by a client that speaks its version.
+    assert_eq!(
+        daemon::request("status").expect("status").phase.as_deref(),
+        Some("idle")
     );
 }

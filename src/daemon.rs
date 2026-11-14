@@ -40,6 +40,12 @@ fn since(at: Instant) -> f32 {
 /// Identifies the daemon on the wire, so a recycled port or a socket some other
 /// service has taken over cannot be mistaken for one.
 const APP: &str = "hippo-voice";
+/// The wire version, sent both ways and checked on both sides.
+///
+/// Bump this when a field changes meaning, not when one is added: an extra field
+/// is ignored by an older reader, and every `Reply` field an older client lacks
+/// is optional. A mismatch refuses the request and says so, because the danger is
+/// a field being read as something it is not.
 const PROTOCOL: u32 = 1;
 
 /// A canned transcript, so the state machine can be tested with no model on
@@ -209,6 +215,11 @@ struct Request {
     /// Present on Windows, where a loopback port alone is not authority.
     #[serde(default)]
     token: Option<String>,
+    /// The client's wire version. Absent from a client older than the field,
+    /// which is treated as version 1 rather than refused: refusing an old client
+    /// is a worse failure than answering it.
+    #[serde(default)]
+    protocol: Option<u32>,
 }
 
 /// The reply to a client.
@@ -255,7 +266,7 @@ pub struct Reply {
 /// One request/response round trip.
 pub fn request(command: &str) -> Result<Reply> {
     let mut stream = transport::connect()?;
-    let mut body = serde_json::json!({ "cmd": command });
+    let mut body = serde_json::json!({ "cmd": command, "protocol": PROTOCOL });
     if let Some(token) = transport::token() {
         body["token"] = serde_json::Value::String(token);
     }
@@ -271,6 +282,16 @@ pub fn request(command: &str) -> Result<Reply> {
     if let Some(app) = &reply.app {
         if app != APP {
             anyhow::bail!("{app} is listening on the daemon endpoint, not {APP}");
+        }
+    }
+    // The other direction of the same check: an older daemon answering a newer
+    // client. Its fields may mean something else, so nothing is trusted from it.
+    if let Some(version) = reply.protocol {
+        if version != PROTOCOL {
+            anyhow::bail!(
+                "the running daemon speaks protocol {version}, this client speaks {PROTOCOL}; \
+                 upgrade or restart it with `hippo-voice quit`"
+            );
         }
     }
     Ok(reply)
@@ -1649,6 +1670,20 @@ fn serve(
         }
     }
 
+    // A different wire version means one side is another build, so a field may
+    // mean something it does not. Nothing is executed; the reason is the reply.
+    if let Some(version) = request.protocol {
+        if version != PROTOCOL {
+            return refuse(
+                &mut *stream,
+                format!(
+                    "this daemon speaks protocol {PROTOCOL}, the client speaks {version}; \
+                     upgrade or restart it with `hippo-voice quit`"
+                ),
+            );
+        }
+    }
+
     let reply = match request.cmd.as_str() {
         "toggle" => {
             let _ = events.send(Event::Toggle);
@@ -1925,6 +1960,33 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     } else {
         "no message".to_string()
     }
+}
+
+/// Answer with nothing but why: no command runs, and the version is reported so
+/// the other side can say what it found.
+fn refuse(stream: &mut dyn Stream, message: String) -> Result<()> {
+    let reply = Reply {
+        ok: false,
+        app: Some(APP.to_string()),
+        protocol: Some(PROTOCOL),
+        phase: None,
+        seconds: None,
+        device: None,
+        text: None,
+        hotkey: None,
+        paste: None,
+        config_revision: None,
+        config_error: None,
+        last_error: None,
+        streaming: None,
+        tier: None,
+        licence: None,
+        timings: None,
+        error: Some(message),
+    };
+    serde_json::to_writer(&mut *stream, &reply)?;
+    stream.write_all(b"\n")?;
+    Ok(())
 }
 
 fn decoder_loop(
