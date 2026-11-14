@@ -34,8 +34,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::daemon::{Phase, Status, SPECTRUM_BANDS};
 
-const WIDTH: i32 = 340;
-const HEIGHT: i32 = 116;
+const WIDTH: i32 = 680;
+const HEIGHT: i32 = 174;
 const MARGIN: i32 = 16;
 const BARS: usize = SPECTRUM_BANDS;
 const TICK: Duration = Duration::from_millis(16);
@@ -275,17 +275,20 @@ unsafe fn paint(window: HWND) {
     let right = width - 18;
     let gap = 3;
     let bar = (((right - left) - gap * (BARS as i32 - 1)) / BARS as i32).max(2);
-    let top = 46;
+    let total = bar * BARS as i32 + gap * (BARS as i32 - 1);
+    let left = (width - total) / 2;
+    let top = 50;
     let bottom = rect.bottom - 12;
     let centre = (top + bottom) / 2;
-    let reach = ((bottom - top) / 2 - 3).max(2) as f32;
+    let reach = ((bottom - top) / 2 - 4).max(2) as f32;
 
     let brush = CreateSolidBrush(rgb(74, 222, 128));
     for (index, level) in levels.iter().enumerate() {
-        // The band values already carry a -60 dB floor and a 60 dB range; a
-        // gentle curve keeps quiet high bands visible without flattening speech.
-        let amplitude = level.clamp(0.0, 1.0).powf(0.8);
-        let half = (3.0 + amplitude * reach) as i32;
+        // The band values already carry a -60 dB floor and a 60 dB range. The
+        // sub-linear curve lifts quiet bands (especially the low end) so the
+        // meter uses the taller card instead of hugging the centre line.
+        let amplitude = level.clamp(0.0, 1.0).powf(0.65);
+        let half = (4.0 + amplitude * reach) as i32;
         let x = left + index as i32 * (bar + gap);
         let column = RECT {
             left: x,

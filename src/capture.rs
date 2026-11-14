@@ -121,7 +121,7 @@ impl Recorder {
 
     /// Normalised magnitude for each logarithmically spaced frequency band.
     ///
-    /// A 1024-sample Hann-windowed DFT at each band centre is enough for a
+    /// A 2048-sample Hann-windowed DFT at each band centre is enough for a
     /// 10 Hz meter and costs far less than pulling in an FFT crate for 44
     /// columns. The result is in 0..1 with a -60 dB floor, which is what the
     /// overlay draws; smoothing belongs to the display so a new capture starts
@@ -132,7 +132,7 @@ impl Recorder {
         };
         let channels = self.channels.max(1);
         let frames = samples.len() / channels;
-        let window = frames.min(1024);
+        let window = frames.min(2048);
         if count == 0 || window < 64 {
             return Vec::new();
         }
@@ -153,7 +153,9 @@ impl Recorder {
             .collect();
 
         let rate = self.rate.max(1) as f32;
-        let low = 100.0f32.min(rate * 0.1);
+        // 50 Hz keeps the bottom of a male voice (and room rumble) in the
+        // display; the 2048-sample window gives ~23 Hz bins at 48 kHz.
+        let low = 50.0f32.min(rate * 0.1);
         let high = (rate * 0.5).min(8000.0).max(low * 2.0);
         let norm = window as f32 * 0.25;
 
