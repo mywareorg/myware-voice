@@ -102,7 +102,7 @@ pub struct Status {
 }
 
 /// Columns in the popup's frequency meter.
-pub const SPECTRUM_BANDS: usize = 100;
+pub const SPECTRUM_BANDS: usize = 36;
 
 impl Default for Status {
     fn default() -> Self {

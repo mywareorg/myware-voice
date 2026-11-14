@@ -34,8 +34,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::daemon::{Phase, Status, SPECTRUM_BANDS};
 
-const WIDTH: i32 = 680;
-const HEIGHT: i32 = 174;
+const WIDTH: i32 = 227;
+const HEIGHT: i32 = 116;
 const MARGIN: i32 = 16;
 const BARS: usize = SPECTRUM_BANDS;
 const TICK: Duration = Duration::from_millis(16);
@@ -273,7 +273,7 @@ unsafe fn paint(window: HWND) {
     // it reads as a waveform rather than a level bar.
     let left = 18;
     let right = width - 18;
-    let gap = 3;
+    let gap = 2;
     let bar = (((right - left) - gap * (BARS as i32 - 1)) / BARS as i32).max(2);
     let total = bar * BARS as i32 + gap * (BARS as i32 - 1);
     let left = (width - total) / 2;

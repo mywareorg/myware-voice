@@ -122,7 +122,7 @@ impl Recorder {
     /// Normalised magnitude for each logarithmically spaced frequency band.
     ///
     /// A 4096-sample Hann-windowed DFT at each band centre is enough for a
-    /// 10 Hz meter and costs far less than pulling in an FFT crate for 100
+    /// 10 Hz meter and costs far less than pulling in an FFT crate for 36
     /// columns. The result is in 0..1 with a -60 dB floor, which is what the
     /// overlay draws; smoothing belongs to the display so a new capture starts
     /// from zero.
