@@ -24,6 +24,10 @@ pub use bindings::*;
 const FEATURE_DIM: i32 = 80;
 /// The model type string that makes sherpa treat the joiner as a TDT joiner.
 const NEMO_TRANSDUCER: &str = "nemo_transducer";
+/// Files the streaming package names, pinned in `models-streaming.lock`.
+const ONLINE_ENCODER: &str = "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
+const ONLINE_DECODER: &str = "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
+const ONLINE_JOINER: &str = "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
 
 type GetVersion = unsafe extern "C" fn() -> *const std::os::raw::c_char;
 type CreateRecognizer = unsafe extern "C" fn(
@@ -40,6 +44,28 @@ type GetResult = unsafe extern "C" fn(
     *const SherpaOnnxOfflineStream,
 ) -> *const SherpaOnnxOfflineRecognizerResult;
 type DestroyResult = unsafe extern "C" fn(*const SherpaOnnxOfflineRecognizerResult);
+type CreateOnlineRecognizer = unsafe extern "C" fn(
+    *const SherpaOnnxOnlineRecognizerConfig,
+) -> *const SherpaOnnxOnlineRecognizer;
+type DestroyOnlineRecognizer = unsafe extern "C" fn(*const SherpaOnnxOnlineRecognizer);
+type CreateOnlineStream =
+    unsafe extern "C" fn(*const SherpaOnnxOnlineRecognizer) -> *const SherpaOnnxOnlineStream;
+type DestroyOnlineStream = unsafe extern "C" fn(*const SherpaOnnxOnlineStream);
+type OnlineAccept = unsafe extern "C" fn(*const SherpaOnnxOnlineStream, i32, *const f32, i32);
+type OnlineReady =
+    unsafe extern "C" fn(*const SherpaOnnxOnlineRecognizer, *const SherpaOnnxOnlineStream) -> i32;
+type OnlineDecode =
+    unsafe extern "C" fn(*const SherpaOnnxOnlineRecognizer, *const SherpaOnnxOnlineStream);
+type OnlineResult = unsafe extern "C" fn(
+    *const SherpaOnnxOnlineRecognizer,
+    *const SherpaOnnxOnlineStream,
+) -> *const SherpaOnnxOnlineRecognizerResult;
+type OnlineDestroyResult = unsafe extern "C" fn(*const SherpaOnnxOnlineRecognizerResult);
+type OnlineEndpoint =
+    unsafe extern "C" fn(*const SherpaOnnxOnlineRecognizer, *const SherpaOnnxOnlineStream) -> i32;
+type OnlineReset =
+    unsafe extern "C" fn(*const SherpaOnnxOnlineRecognizer, *const SherpaOnnxOnlineStream);
+type OnlineInputFinished = unsafe extern "C" fn(*const SherpaOnnxOnlineStream);
 
 struct Fns {
     get_version: GetVersion,
@@ -51,6 +77,18 @@ struct Fns {
     decode_stream: DecodeStream,
     get_result: GetResult,
     destroy_result: DestroyResult,
+    create_online_recognizer: CreateOnlineRecognizer,
+    destroy_online_recognizer: DestroyOnlineRecognizer,
+    create_online_stream: CreateOnlineStream,
+    destroy_online_stream: DestroyOnlineStream,
+    online_accept: OnlineAccept,
+    online_ready: OnlineReady,
+    online_decode: OnlineDecode,
+    online_result: OnlineResult,
+    online_destroy_result: OnlineDestroyResult,
+    online_endpoint: OnlineEndpoint,
+    online_reset: OnlineReset,
+    online_input_finished: OnlineInputFinished,
 }
 
 /// The loaded library and its function table.
@@ -205,6 +243,33 @@ impl Sherpa {
                 decode_stream: sym!(b"SherpaOnnxDecodeOfflineStream\0", DecodeStream),
                 get_result: sym!(b"SherpaOnnxGetOfflineStreamResult\0", GetResult),
                 destroy_result: sym!(b"SherpaOnnxDestroyOfflineRecognizerResult\0", DestroyResult),
+                create_online_recognizer: sym!(
+                    b"SherpaOnnxCreateOnlineRecognizer\0",
+                    CreateOnlineRecognizer
+                ),
+                destroy_online_recognizer: sym!(
+                    b"SherpaOnnxDestroyOnlineRecognizer\0",
+                    DestroyOnlineRecognizer
+                ),
+                create_online_stream: sym!(b"SherpaOnnxCreateOnlineStream\0", CreateOnlineStream),
+                destroy_online_stream: sym!(
+                    b"SherpaOnnxDestroyOnlineStream\0",
+                    DestroyOnlineStream
+                ),
+                online_accept: sym!(b"SherpaOnnxOnlineStreamAcceptWaveform\0", OnlineAccept),
+                online_ready: sym!(b"SherpaOnnxIsOnlineStreamReady\0", OnlineReady),
+                online_decode: sym!(b"SherpaOnnxDecodeOnlineStream\0", OnlineDecode),
+                online_result: sym!(b"SherpaOnnxGetOnlineStreamResult\0", OnlineResult),
+                online_destroy_result: sym!(
+                    b"SherpaOnnxDestroyOnlineRecognizerResult\0",
+                    OnlineDestroyResult
+                ),
+                online_endpoint: sym!(b"SherpaOnnxOnlineStreamIsEndpoint\0", OnlineEndpoint),
+                online_reset: sym!(b"SherpaOnnxOnlineStreamReset\0", OnlineReset),
+                online_input_finished: sym!(
+                    b"SherpaOnnxOnlineStreamInputFinished\0",
+                    OnlineInputFinished
+                ),
             };
             Ok(Arc::new(Self {
                 _lib: lib,
@@ -287,6 +352,174 @@ impl Sherpa {
             sherpa: Arc::clone(self),
             handle,
         })
+    }
+
+    /// Create a streaming zipformer recognizer for the small int8 package.
+    pub fn online_recognizer(
+        self: &Arc<Self>,
+        model_dir: &Path,
+        threads: i32,
+    ) -> Result<OnlineRecognizer> {
+        let encoder = model_dir.join(ONLINE_ENCODER);
+        let decoder = model_dir.join(ONLINE_DECODER);
+        let joiner = model_dir.join(ONLINE_JOINER);
+        let tokens = model_dir.join("tokens.txt");
+        for file in [&encoder, &decoder, &joiner, &tokens] {
+            if !file.is_file() {
+                bail!("missing streaming model file {}", file.display());
+            }
+        }
+
+        let encoder = cpath(&encoder);
+        let decoder = cpath(&decoder);
+        let joiner = cpath(&joiner);
+        let tokens = cpath(&tokens);
+        let empty = CString::new("").expect("empty string");
+        let decoding = CString::new("greedy_search").expect("static string");
+        let provider = CString::new("cpu").expect("static string");
+
+        // SAFETY: zeroed config plus field writes; every CString outlives the
+        // create call, which copies what it needs.
+        let mut config: SherpaOnnxOnlineRecognizerConfig = unsafe { std::mem::zeroed() };
+        config.feat_config.sample_rate = crate::audio::SAMPLE_RATE as i32;
+        config.feat_config.feature_dim = FEATURE_DIM;
+        config.model_config.transducer.encoder = encoder.as_ptr();
+        config.model_config.transducer.decoder = decoder.as_ptr();
+        config.model_config.transducer.joiner = joiner.as_ptr();
+        config.model_config.tokens = tokens.as_ptr();
+        config.model_config.provider = provider.as_ptr();
+        config.model_config.num_threads = threads.max(1);
+        config.model_config.model_type = empty.as_ptr();
+        config.model_config.modeling_unit = empty.as_ptr();
+        config.model_config.bpe_vocab = empty.as_ptr();
+        config.decoding_method = decoding.as_ptr();
+        config.max_active_paths = 4;
+        config.enable_endpoint = 1;
+        // Short pauses end a phrase, so the popup returns text while the user is
+        // still speaking; the hard limit stops a monologue growing one segment.
+        config.rule1_min_trailing_silence = 0.6;
+        config.rule2_min_trailing_silence = 1.2;
+        config.rule3_min_utterance_length = 10.0;
+
+        let handle = unsafe { (self.fns.create_online_recognizer)(&config) };
+        if handle.is_null() {
+            bail!(
+                "sherpa-onnx could not create a streaming recognizer for {}",
+                model_dir.display()
+            );
+        }
+        Ok(OnlineRecognizer {
+            sherpa: Arc::clone(self),
+            handle,
+        })
+    }
+}
+
+/// A streaming recognizer. It keeps decoder state across `accept` calls, which
+/// is what makes word-by-word output possible.
+pub struct OnlineRecognizer {
+    sherpa: Arc<Sherpa>,
+    handle: *const SherpaOnnxOnlineRecognizer,
+}
+
+// The handle is only used for decoding its own streams.
+unsafe impl Send for OnlineRecognizer {}
+unsafe impl Sync for OnlineRecognizer {}
+
+impl Drop for OnlineRecognizer {
+    fn drop(&mut self) {
+        unsafe { (self.sherpa.fns.destroy_online_recognizer)(self.handle) }
+    }
+}
+
+impl OnlineRecognizer {
+    pub fn stream(self: &Arc<Self>) -> Result<OnlineStream> {
+        let handle = unsafe { (self.sherpa.fns.create_online_stream)(self.handle) };
+        if handle.is_null() {
+            bail!("sherpa-onnx could not create an online stream");
+        }
+        Ok(OnlineStream {
+            recognizer: Arc::clone(self),
+            handle,
+        })
+    }
+}
+
+/// One streaming utterance. Feed 16 kHz mono with [`accept`](Self::accept);
+/// [`text`](Self::text) is the hypothesis so far.
+pub struct OnlineStream {
+    recognizer: Arc<OnlineRecognizer>,
+    handle: *const SherpaOnnxOnlineStream,
+}
+
+unsafe impl Send for OnlineStream {}
+
+impl Drop for OnlineStream {
+    fn drop(&mut self) {
+        unsafe { (self.recognizer.sherpa.fns.destroy_online_stream)(self.handle) }
+    }
+}
+
+impl OnlineStream {
+    /// Accept audio and drain the decoder. Short chunks (100-300 ms) keep the
+    /// displayed hypothesis close to the microphone.
+    pub fn accept(&self, samples: &[f32], sample_rate: u32) -> Result<()> {
+        if samples.is_empty() {
+            return Ok(());
+        }
+        let len = i32::try_from(samples.len()).context("chunk longer than i32 samples")?;
+        let fns = &self.recognizer.sherpa.fns;
+        unsafe {
+            (fns.online_accept)(self.handle, sample_rate as i32, samples.as_ptr(), len);
+            while (fns.online_ready)(self.recognizer.handle, self.handle) != 0 {
+                (fns.online_decode)(self.recognizer.handle, self.handle);
+            }
+        }
+        Ok(())
+    }
+
+    /// Current hypothesis, without the trailing space the model sometimes adds.
+    pub fn text(&self) -> Result<String> {
+        let fns = &self.recognizer.sherpa.fns;
+        unsafe {
+            let result = (fns.online_result)(self.recognizer.handle, self.handle);
+            if result.is_null() {
+                return Ok(String::new());
+            }
+            let text = if (*result).text.is_null() {
+                String::new()
+            } else {
+                CStr::from_ptr((*result).text)
+                    .to_string_lossy()
+                    .trim()
+                    .to_string()
+            };
+            (fns.online_destroy_result)(result);
+            Ok(text)
+        }
+    }
+
+    pub fn endpoint(&self) -> bool {
+        let fns = &self.recognizer.sherpa.fns;
+        unsafe { (fns.online_endpoint)(self.recognizer.handle, self.handle) != 0 }
+    }
+
+    /// Start the next phrase after an endpoint.
+    pub fn reset(&self) {
+        let fns = &self.recognizer.sherpa.fns;
+        unsafe { (fns.online_reset)(self.recognizer.handle, self.handle) }
+    }
+
+    /// Mark end of input and return the final hypothesis for this phrase.
+    pub fn finish(&self) -> Result<String> {
+        let fns = &self.recognizer.sherpa.fns;
+        unsafe {
+            (fns.online_input_finished)(self.handle);
+            while (fns.online_ready)(self.recognizer.handle, self.handle) != 0 {
+                (fns.online_decode)(self.recognizer.handle, self.handle);
+            }
+        }
+        self.text()
     }
 }
 
@@ -484,5 +717,28 @@ mod resolution {
         let text = error.to_string();
         assert!(text.contains("fetch-sherpa"), "{text}");
         assert!(text.contains("HIPPO_VOICE_SHERPA_DIR"), "{text}");
+    }
+
+    /// Not part of the normal suite: it needs a downloaded streaming package and
+    /// a WAV, so it is the one test that exercises the online C API and its
+    /// struct layouts. Run with both variables set and `--ignored`.
+    #[test]
+    #[ignore = "needs HIPPO_VOICE_STREAMING_MODEL_DIR and HIPPO_VOICE_SMOKE_WAV"]
+    fn the_online_recognizer_accepts_audio() {
+        let dir = std::env::var("HIPPO_VOICE_STREAMING_MODEL_DIR").expect("model dir");
+        let wav = std::env::var("HIPPO_VOICE_SMOKE_WAV").expect("wav path");
+        let sherpa = Sherpa::open().expect("sherpa");
+        let recognizer = Arc::new(
+            sherpa
+                .online_recognizer(Path::new(&dir), 4)
+                .expect("online recognizer"),
+        );
+        let stream = recognizer.stream().expect("stream");
+        let (samples, rate) = crate::audio::read_wav(Path::new(&wav)).expect("wav");
+        for chunk in samples.chunks(1600) {
+            stream.accept(chunk, rate).expect("accept");
+        }
+        let text = stream.finish().expect("finish");
+        assert!(!text.trim().is_empty(), "empty transcript");
     }
 }

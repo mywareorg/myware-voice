@@ -269,3 +269,163 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub fn SherpaOnnxDestroyOfflineRecognizerResult(r: *const SherpaOnnxOfflineRecognizerResult);
 }
+
+// --- Streaming (online) recognizer -----------------------------------------
+//
+// Copied from the 1.13.8 header beside `sherpa.lock`. The struct layouts are
+// part of the ABI; changing the pinned runtime without regenerating this block
+// is undefined behaviour.
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SherpaOnnxOnlineTransducerModelConfig {
+    pub encoder: *const ::std::os::raw::c_char,
+    pub decoder: *const ::std::os::raw::c_char,
+    pub joiner: *const ::std::os::raw::c_char,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SherpaOnnxOnlineParaformerModelConfig {
+    pub encoder: *const ::std::os::raw::c_char,
+    pub decoder: *const ::std::os::raw::c_char,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SherpaOnnxOnlineZipformer2CtcModelConfig {
+    pub model: *const ::std::os::raw::c_char,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SherpaOnnxOnlineNemoCtcModelConfig {
+    pub model: *const ::std::os::raw::c_char,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SherpaOnnxOnlineToneCtcModelConfig {
+    pub model: *const ::std::os::raw::c_char,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SherpaOnnxOnlineModelConfig {
+    pub transducer: SherpaOnnxOnlineTransducerModelConfig,
+    pub paraformer: SherpaOnnxOnlineParaformerModelConfig,
+    pub zipformer2_ctc: SherpaOnnxOnlineZipformer2CtcModelConfig,
+    pub tokens: *const ::std::os::raw::c_char,
+    pub num_threads: i32,
+    pub provider: *const ::std::os::raw::c_char,
+    pub debug: i32,
+    pub model_type: *const ::std::os::raw::c_char,
+    pub modeling_unit: *const ::std::os::raw::c_char,
+    pub bpe_vocab: *const ::std::os::raw::c_char,
+    pub tokens_buf: *const ::std::os::raw::c_char,
+    pub tokens_buf_size: i32,
+    pub nemo_ctc: SherpaOnnxOnlineNemoCtcModelConfig,
+    pub t_one_ctc: SherpaOnnxOnlineToneCtcModelConfig,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SherpaOnnxOnlineCtcFstDecoderConfig {
+    pub graph: *const ::std::os::raw::c_char,
+    pub max_active: i32,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SherpaOnnxOnlineRecognizerConfig {
+    pub feat_config: SherpaOnnxFeatureConfig,
+    pub model_config: SherpaOnnxOnlineModelConfig,
+    pub decoding_method: *const ::std::os::raw::c_char,
+    pub max_active_paths: i32,
+    pub enable_endpoint: i32,
+    pub rule1_min_trailing_silence: f32,
+    pub rule2_min_trailing_silence: f32,
+    pub rule3_min_utterance_length: f32,
+    pub hotwords_file: *const ::std::os::raw::c_char,
+    pub hotwords_score: f32,
+    pub ctc_fst_decoder_config: SherpaOnnxOnlineCtcFstDecoderConfig,
+    pub rule_fsts: *const ::std::os::raw::c_char,
+    pub rule_fars: *const ::std::os::raw::c_char,
+    pub blank_penalty: f32,
+    pub hotwords_buf: *const ::std::os::raw::c_char,
+    pub hotwords_buf_size: i32,
+    pub hr: SherpaOnnxHomophoneReplacerConfig,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SherpaOnnxOnlineRecognizerResult {
+    pub text: *const ::std::os::raw::c_char,
+    pub tokens: *const ::std::os::raw::c_char,
+    pub tokens_arr: *const *const ::std::os::raw::c_char,
+    pub timestamps: *mut f32,
+    pub count: i32,
+    pub json: *const ::std::os::raw::c_char,
+}
+#[repr(C)]
+#[derive(Debug)]
+pub struct SherpaOnnxOnlineRecognizer {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug)]
+pub struct SherpaOnnxOnlineStream {
+    _unused: [u8; 0],
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxCreateOnlineRecognizer(
+        config: *const SherpaOnnxOnlineRecognizerConfig,
+    ) -> *const SherpaOnnxOnlineRecognizer;
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxDestroyOnlineRecognizer(recognizer: *const SherpaOnnxOnlineRecognizer);
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxCreateOnlineStream(
+        recognizer: *const SherpaOnnxOnlineRecognizer,
+    ) -> *const SherpaOnnxOnlineStream;
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxDestroyOnlineStream(stream: *const SherpaOnnxOnlineStream);
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxOnlineStreamAcceptWaveform(
+        stream: *const SherpaOnnxOnlineStream,
+        sample_rate: i32,
+        samples: *const f32,
+        n: i32,
+    );
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxIsOnlineStreamReady(
+        recognizer: *const SherpaOnnxOnlineRecognizer,
+        stream: *const SherpaOnnxOnlineStream,
+    ) -> i32;
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxDecodeOnlineStream(
+        recognizer: *const SherpaOnnxOnlineRecognizer,
+        stream: *const SherpaOnnxOnlineStream,
+    );
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxGetOnlineStreamResult(
+        recognizer: *const SherpaOnnxOnlineRecognizer,
+        stream: *const SherpaOnnxOnlineStream,
+    ) -> *const SherpaOnnxOnlineRecognizerResult;
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxDestroyOnlineRecognizerResult(r: *const SherpaOnnxOnlineRecognizerResult);
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxOnlineStreamIsEndpoint(
+        recognizer: *const SherpaOnnxOnlineRecognizer,
+        stream: *const SherpaOnnxOnlineStream,
+    ) -> i32;
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxOnlineStreamReset(
+        recognizer: *const SherpaOnnxOnlineRecognizer,
+        stream: *const SherpaOnnxOnlineStream,
+    );
+}
+unsafe extern "C" {
+    pub fn SherpaOnnxOnlineStreamInputFinished(stream: *const SherpaOnnxOnlineStream);
+}

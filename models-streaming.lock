@@ -1,0 +1,28 @@
+# The streaming zipformer used only by streaming dictation.
+#
+# A 73 MB int8 package: ~0.6-1 s lookahead, so it can emit words while the user
+# is still speaking. The Parakeet package stays the batch dictation model.
+#
+# Apache-2.0. Export by k2-fsa/sherpa-onnx from an icefall streaming zipformer
+# trained on LibriSpeech; attribution is required in the About text.
+version = "en-2023-06-26-int8"
+dir = "streaming-zipformer-en-int8"
+base = "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26/resolve/main"
+license = "Apache-2.0"
+attribution = "k2-fsa/icefall streaming zipformer (en-2023-06-26); ONNX export by k2-fsa/sherpa-onnx"
+
+[[file]]
+name = "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx"
+sha256 = "563fde436d16cf7607cf408cd6b30909819d03162652ef389c2450ced3f45ac1"
+
+[[file]]
+name = "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx"
+sha256 = "98da299f471e38bb4e1a8df579b8cc9122d6039576a77e357b3c60f17dd83b02"
+
+[[file]]
+name = "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx"
+sha256 = "d944208d660d67c8d72cd2acaeac971fa5ceb8c80e76c1968148846fedd6e297"
+
+[[file]]
+name = "tokens.txt"
+sha256 = "49e3c2646595fd907228b3c6787069658f67b17377c60aeb8619c4551b2316fb"

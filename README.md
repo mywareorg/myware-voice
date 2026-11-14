@@ -42,7 +42,9 @@ which is how the warm-model decision is measured rather than guessed.
 
 `model status | verify | download` owns the 640 MB package. `verify` hashes every
 file; `download` resumes a partial file, re-downloads one whose checksum is
-wrong, and refuses to install a bad copy.
+wrong, and refuses to install a bad copy. Add `--streaming` to any of them for
+the optional 73 MB word-by-word package; `scripts/fetch-streaming-model.ps1`
+does the same on Windows without the CLI.
 
 `log` prints where the daemon writes and the last lines of it; the file is capped
 at 1 MiB so a resident daemon cannot fill a disk. `history` prints the opt-in
@@ -192,13 +194,14 @@ run.** What is wired:
   so the input-method switch on some layouts and editor autocomplete stop
   reaching their applications; `hotkey = "ctrl+alt+space"` in `config.toml`
   trades the shorter chord for that. The settings window has the same field.
-- **Streaming mode** (`ctrl+shift+space`) records continuously and pastes each
-  phrase as it is transcribed, instead of waiting for the stop press. Parakeet
-  is an offline model, so this commits at pauses near `stream_seconds` (3 s by
-  default) rather than word by word; a long unbroken sentence forces a commit at
-  2.5x that. It stops if focus changes, because continuing would paste into the
-  wrong window. `stream_hotkey` and `stream_seconds` are config fields; the
-  chord is editable in settings.
+- **Streaming mode** (`ctrl+shift+space`) records continuously and pastes text
+  while you speak. When the streaming zipformer package is installed it is
+  word-by-word: a 73 MB online model keeps decoder state, and only words that
+  survive one revision are pasted. Without that package it falls back to
+  Parakeet phrase chunks committed at pauses near `stream_seconds` (3 s by
+  default, editable in settings). Either way the session stops if focus changes,
+  because continuing would paste into the wrong window. `stream_hotkey`,
+  `stream_seconds` and `HIPPO_VOICE_STREAMING_MODEL_DIR` are config knobs.
 - The transport is loopback TCP on an ephemeral port with a per-run token in the
   state directory: an open port is not authority to open a microphone.
 - Delivery is `arboard` for the clipboard and `enigo` (`SendInput`) for the chord.
@@ -235,7 +238,7 @@ it), builds the whole workspace so `hippo-voice-settings.exe` exists beside the
 daemon, and then runs `cargo run --bin hippo-voice-daemon`. The daemon is a
 GUI-subsystem binary, so no console window survives the launch; the terminal
 stays with cargo until you Quit from the tray. `-Release` uses the release
-profile. The equivalent without the preflight checks is
+profile. `-WithStreamingModel` fetches the optional word-by-word package. The equivalent without the preflight checks is
 `cargo build --workspace` followed by `cargo run --bin hippo-voice-daemon`; the
 workspace build matters because the tray launches the settings executable from
 the daemon's own directory.
@@ -256,4 +259,6 @@ Code: LGPL-2.1-only.
 
 Model: Parakeet TDT 0.6B v3 is **CC BY 4.0** — NVIDIA trained it, the
 sherpa-onnx project produced the ONNX export. Attribution is required and is
-recorded in `models.lock`. sherpa-onnx is Apache-2.0; ONNX Runtime is MIT.
+recorded in `models.lock`. The optional streaming zipformer is **Apache-2.0**
+(k2-fsa/icefall, exported by sherpa-onnx) and is recorded in
+`models-streaming.lock`. sherpa-onnx is Apache-2.0; ONNX Runtime is MIT.

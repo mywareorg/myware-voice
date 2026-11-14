@@ -17,6 +17,7 @@
 [CmdletBinding()]
 param(
     [switch]$WithModel,
+    [switch]$WithStreamingModel,
     [switch]$Release
 )
 
@@ -153,6 +154,24 @@ try {
     if (-not $modelReady) {
         Write-Warning "no model at $modelDir"
         Write-Warning 'dictation will fail until it is fetched: .\scripts\fetch-model.ps1 (or rerun with -WithModel)'
+    }
+
+    $streamDir = $null
+    $streamLock = Get-Content -LiteralPath (Join-Path $root 'models-streaming.lock') -Raw
+    if ($streamLock -match '(?m)^dir\s*=\s*"(.+)"') {
+        $streamDir = Join-Path $root (Join-Path 'vendor\models' $matches[1])
+    }
+    $streamReady = $streamDir -and (Test-Path -LiteralPath (Join-Path $streamDir 'tokens.txt'))
+
+    if ($WithStreamingModel -and -not $streamReady) {
+        Write-Host 'fetching the streaming model (73 MB)'
+        & (Join-Path $PSScriptRoot 'fetch-streaming-model.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'fetch-streaming-model.ps1 failed' }
+        $streamReady = $true
+    }
+    if (-not $streamReady) {
+        Write-Warning "no streaming model at $streamDir"
+        Write-Warning 'streaming mode will use phrase chunks: .\scripts\fetch-streaming-model.ps1 (or rerun with -WithStreamingModel)'
     }
 
     Write-Host ''

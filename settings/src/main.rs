@@ -20,6 +20,8 @@ use std::time::Duration;
 
 const SYSTEM_DEFAULT: &str = "System default";
 const CHUNKS: [&str; 4] = ["10 s", "15 s", "20 s", "30 s"];
+/// Fallback phrase length for streaming when the online model is absent.
+const STREAM_CHUNKS: [&str; 5] = ["1.0 s", "1.5 s", "2.0 s", "3.0 s", "5.0 s"];
 
 /// The header mark, in logical pixels. It sits inside the control height beside
 /// the title, and 128 px of source cover a 4x display.
@@ -73,6 +75,7 @@ enum Message {
     Paste(PasteMethod),
     Hotkey(String),
     StreamHotkey(String),
+    StreamChunk(&'static str),
     Theme(AppTheme),
     Chunk(&'static str),
     ToggleTones,
@@ -202,6 +205,12 @@ impl Settings {
                     }
                     Err(error) => self.stream_error = Some(error.to_string()),
                 }
+            }
+            Message::StreamChunk(label) => {
+                self.config.stream_seconds = label
+                    .trim_end_matches(" s")
+                    .parse()
+                    .unwrap_or(self.config.stream_seconds);
             }
             Message::Theme(mode) => self.mode = mode,
             Message::Chunk(label) => {
@@ -409,6 +418,19 @@ impl Settings {
             } else {
                 scheme.muted
             }),
+            settings_row(
+                "Phrase chunk",
+                pick_list(
+                    STREAM_CHUNKS.as_slice(),
+                    Some(stream_chunk_label(self.config.stream_seconds)),
+                    Message::StreamChunk
+                )
+                .style(pill_pick(scheme)),
+                scheme,
+            ),
+            text("Fallback phrase length when the word-by-word model is not installed. Shorter chunks appear sooner but cut words more often.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
             settings_divider(scheme),
             section("Recognition", scheme),
             settings_row(
@@ -617,6 +639,13 @@ fn chunk_label(seconds: f32) -> &'static str {
         .into_iter()
         .find(|label| label.trim_end_matches(" s").parse::<f32>() == Ok(seconds))
         .unwrap_or("20 s")
+}
+
+fn stream_chunk_label(seconds: f32) -> &'static str {
+    STREAM_CHUNKS
+        .into_iter()
+        .find(|label| label.trim_end_matches(" s").parse::<f32>() == Ok(seconds))
+        .unwrap_or("3.0 s")
 }
 
 fn load_entries(config: &Config) -> Vec<history::Entry> {

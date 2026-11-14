@@ -317,6 +317,11 @@ struct Daemon {
     stream_committed: usize,
     stream_focus: Option<Focus>,
     stream_text: String,
+    /// Word-by-word path: a streaming zipformer stream kept for the session.
+    online: Option<crate::sherpa::OnlineStream>,
+    online_fed: usize,
+    online_last: String,
+    online_pasted: String,
 }
 
 impl Daemon {
@@ -389,6 +394,14 @@ impl Daemon {
             self.stream_committed = committed;
             self.stream_focus = inject::focus();
             self.stream_text.clear();
+            if let Err(error) = self.open_online() {
+                note_error(&format!(
+                    "streaming model unavailable; using phrase chunks instead: {error:#}"
+                ));
+            } else {
+                // The audio already in the recorder was not part of this mode.
+                self.online_fed = committed;
+            }
             if let Ok(mut status) = self.status.lock() {
                 status.streaming = true;
             }
@@ -426,11 +439,36 @@ impl Daemon {
             "recording on {device}{}",
             if streaming { " (streaming)" } else { "" }
         ));
+        if streaming {
+            // The capture is already running, so a cold model load overlaps the
+            // first words instead of delaying the toast or the microphone.
+            if let Err(error) = self.open_online() {
+                // The phrase-chunking path is still a usable streaming mode;
+                // say why the word-by-word model is not in play.
+                note_error(&format!(
+                    "streaming model unavailable; using phrase chunks instead: {error:#}"
+                ));
+            }
+        }
         Ok(())
     }
 
     fn stop_recording(&mut self) {
         self.recorder = None;
+        self.online = None;
+    }
+
+    /// Load the streaming zipformer and open one stream for this session.
+    fn open_online(&mut self) -> Result<()> {
+        let dir = crate::model::streaming_dir()?;
+        let sherpa = Sherpa::open()?;
+        let recognizer = Arc::new(sherpa.online_recognizer(&dir, 4)?);
+        self.online = Some(recognizer.stream()?);
+        self.online_fed = 0;
+        self.online_last.clear();
+        self.online_pasted.clear();
+        log::write(&format!("streaming model {}", dir.display()));
+        Ok(())
     }
 
     fn stop_recording_and_decode(&mut self) -> Result<()> {
@@ -496,6 +534,13 @@ impl Daemon {
         if phase != Phase::Recording {
             return;
         }
+        if self.online.is_some() {
+            if let Err(error) = self.online_tick() {
+                note_error(&format!("streaming: {error:#}"));
+                self.set(Phase::Idle);
+            }
+            return;
+        }
         let Some((mono, rate)) = self
             .recorder
             .as_ref()
@@ -545,6 +590,9 @@ impl Daemon {
 
     /// Stop capturing and decode whatever has not been committed yet.
     fn stop_streaming(&mut self) -> Result<()> {
+        if self.online.is_some() {
+            return self.stop_online();
+        }
         let Some(recorder) = self.recorder.take() else {
             self.set(Phase::Idle);
             return Ok(());
@@ -601,6 +649,151 @@ impl Daemon {
         Ok(())
     }
 
+    /// Feed the online recognizer and paste newly confirmed words.
+    fn online_tick(&mut self) -> Result<()> {
+        let Some((mono, rate)) = self
+            .recorder
+            .as_ref()
+            .map(|recorder| recorder.snapshot_mono())
+        else {
+            return Ok(());
+        };
+        if self.online_fed >= mono.len() {
+            return Ok(());
+        }
+        let raw = &mono[self.online_fed..];
+        // 50 ms of audio keeps the hypothesis moving without running the
+        // feature frontend on every poll.
+        if raw.len() < (rate as usize / 20).max(160) {
+            return Ok(());
+        }
+
+        let (hypothesis, endpoint) = {
+            let Some(stream) = self.online.as_ref() else {
+                return Ok(());
+            };
+            // The streaming API takes the device rate and resamples internally,
+            // so feeding it raw avoids padding a 16 kHz resampler at every
+            // chunk edge.
+            stream.accept(raw, rate)?;
+            (stream.text()?, stream.endpoint())
+        };
+        self.online_fed = mono.len();
+
+        if endpoint {
+            self.commit_online_final(&hypothesis)?;
+            if let Some(stream) = self.online.as_ref() {
+                stream.reset();
+            }
+            self.online_last.clear();
+            self.online_pasted.clear();
+        } else {
+            self.commit_online(&hypothesis)?;
+            self.online_last = hypothesis;
+        }
+        Ok(())
+    }
+
+    /// Paste the longest common prefix with the previous hypothesis that ends on
+    /// a word boundary. The tail is still being revised, so it waits.
+    fn commit_online(&mut self, hypothesis: &str) -> Result<()> {
+        let stable = stable_prefix(&self.online_last, hypothesis);
+        if stable.len() <= self.online_pasted.len() {
+            return Ok(());
+        }
+        if !stable.starts_with(&self.online_pasted) {
+            inject::notify(
+                "Streaming stopped",
+                "The recognizer revised text that was already pasted",
+            );
+            return Err(anyhow!(
+                "streaming hypothesis changed after it was pasted; stopping"
+            ));
+        }
+        let suffix = stable[self.online_pasted.len()..].trim();
+        if suffix.is_empty() {
+            return Ok(());
+        }
+        self.deliver_stream(suffix, false)?;
+        self.online_pasted = stable;
+        Ok(())
+    }
+
+    /// At an endpoint the hypothesis is final for this phrase, so paste all of
+    /// it and let the recognizer start a new segment.
+    fn commit_online_final(&mut self, hypothesis: &str) -> Result<()> {
+        let text = hypothesis.trim();
+        if text.is_empty() {
+            return Ok(());
+        }
+        let pasted = self.online_pasted.trim();
+        let suffix = if pasted.is_empty() {
+            text
+        } else if let Some(rest) = text.strip_prefix(pasted) {
+            rest.trim()
+        } else {
+            inject::notify(
+                "Streaming stopped",
+                "The recognizer revised text that was already pasted",
+            );
+            return Err(anyhow!(
+                "streaming hypothesis changed after it was pasted; stopping"
+            ));
+        };
+        if !suffix.is_empty() {
+            self.deliver_stream(suffix, false)?;
+        }
+        self.online_pasted = text.to_string();
+        Ok(())
+    }
+
+    /// Stop the online session: drain the last samples, paste the final phrase
+    /// and release the model.
+    fn stop_online(&mut self) -> Result<()> {
+        let Some(recorder) = self.recorder.take() else {
+            self.end_stream();
+            return Ok(());
+        };
+        let (mono, rate) = recorder.finish_mono();
+        if self.online_fed < mono.len() {
+            if let Some(stream) = self.online.as_ref() {
+                let _ = stream.accept(&mono[self.online_fed..], rate);
+            }
+        }
+
+        let text = match self.online.as_ref() {
+            Some(stream) => stream.finish()?.trim().to_string(),
+            None => String::new(),
+        };
+        if !text.is_empty() {
+            let pasted = self.online_pasted.trim();
+            let suffix = if pasted.is_empty() {
+                Some(text.as_str())
+            } else {
+                text.strip_prefix(pasted).map(str::trim)
+            };
+            match suffix {
+                Some(suffix) if !suffix.is_empty() => {
+                    self.deliver_stream(suffix, true)?;
+                }
+                Some(_) => {}
+                None => {
+                    inject::notify(
+                        "Streaming stopped",
+                        "The final words were revised and not pasted",
+                    );
+                }
+            }
+        }
+
+        self.online = None;
+        self.online_fed = 0;
+        self.online_last.clear();
+        self.online_pasted.clear();
+        self.end_stream();
+        Ok(())
+    }
+
     fn streamed(&mut self, generation: u64, text: String, final_chunk: bool) -> Result<()> {
         if !self.streaming || generation != self.generation.load(Ordering::SeqCst) {
             return Ok(());
@@ -613,6 +806,18 @@ impl Daemon {
             return Ok(());
         }
 
+        self.deliver_stream(text, final_chunk)?;
+        if final_chunk {
+            self.end_stream();
+        }
+        Ok(())
+    }
+
+    /// Copy and paste one piece of a streaming session.
+    ///
+    /// Both the phrase-chunked fallback and the online recognizer go through
+    /// this, so the focus guard, clipboard behaviour and history are identical.
+    fn deliver_stream(&mut self, text: &str, final_chunk: bool) -> Result<()> {
         let now = inject::focus();
         if !same_focus(self.stream_focus.as_ref(), now.as_ref()) {
             inject::notify(
@@ -636,9 +841,6 @@ impl Daemon {
 
         if self.fake_delivery {
             log::write("streamed (fake delivery)");
-            if final_chunk {
-                self.end_stream();
-            }
             return Ok(());
         }
 
@@ -656,9 +858,6 @@ impl Daemon {
             status.last_text = Some(text.to_string());
         }
         log::write(&format!("streamed {} chars", text.chars().count()));
-        if final_chunk {
-            self.end_stream();
-        }
         Ok(())
     }
 
@@ -799,6 +998,10 @@ impl Daemon {
     fn set(&mut self, phase: Phase) {
         if phase == Phase::Idle {
             self.streaming = false;
+            self.online = None;
+            self.online_fed = 0;
+            self.online_last.clear();
+            self.online_pasted.clear();
         }
         if let Ok(mut status) = self.status.lock() {
             status.phase = phase;
@@ -848,6 +1051,25 @@ fn same_focus(captured: Option<&Focus>, now: Option<&Focus>) -> bool {
     match captured {
         None => true,
         Some(captured) => now.is_some_and(|now| captured == now),
+    }
+}
+
+/// The longest prefix of two online hypotheses that ends on a word boundary.
+///
+/// A hypothesis that has not changed still only confirms the words before its
+/// last space: the model may be about to revise the trailing word, and once
+/// text is pasted it cannot be taken back without editing the user's document.
+fn stable_prefix(previous: &str, current: &str) -> String {
+    let mut common = String::new();
+    for (before, now) in previous.chars().zip(current.chars()) {
+        if before != now {
+            break;
+        }
+        common.push(before);
+    }
+    match common.rfind(' ') {
+        Some(index) => common[..index].trim_end().to_string(),
+        None => String::new(),
     }
 }
 
@@ -964,6 +1186,10 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
         stream_committed: 0,
         stream_focus: None,
         stream_text: String::new(),
+        online: None,
+        online_fed: 0,
+        online_last: String::new(),
+        online_pasted: String::new(),
     };
 
     loop {

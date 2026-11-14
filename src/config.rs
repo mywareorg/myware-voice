@@ -85,8 +85,10 @@ pub struct Config {
     pub hotkey: String,
     /// The chord that starts and stops streaming dictation on Windows.
     pub stream_hotkey: String,
-    /// Target seconds per incrementally transcribed phrase. Streaming waits for
-    /// a pause near this length before committing, so a word is not cut in two.
+    /// Target seconds per fallback phrase when the online streaming model is
+    /// not installed. Streaming waits for a pause near this length before
+    /// committing, so a word is not cut in two. The word-by-word model ignores
+    /// it.
     pub stream_seconds: f32,
     /// Keep delivered transcripts at rest. Off by default: the app's premise is
     /// that transcripts stay where the user puts them.

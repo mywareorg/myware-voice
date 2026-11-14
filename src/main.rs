@@ -28,11 +28,21 @@ struct Cli {
 #[derive(Subcommand)]
 enum ModelCommand {
     /// Show the package, its files and where it lives.
-    Status,
+    Status {
+        /// Show the streaming model instead of the batch model.
+        #[arg(long)]
+        streaming: bool,
+    },
     /// Hash every file and report a corrupt one.
-    Verify,
+    Verify {
+        #[arg(long)]
+        streaming: bool,
+    },
     /// Fetch what is missing, resuming partial files.
-    Download,
+    Download {
+        #[arg(long)]
+        streaming: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -250,6 +260,28 @@ fn doctor() -> Result<()> {
         }
     }
 
+    match model::streaming_dir() {
+        Ok(dir) => match model::inspect_streaming(&dir, false) {
+            Ok(rows) => {
+                let missing: Vec<&str> = rows
+                    .iter()
+                    .filter(|(_, state, _)| *state != model::State::Present)
+                    .map(|(file, _, _)| file.name.as_str())
+                    .collect();
+                if missing.is_empty() {
+                    println!("streaming     {}", dir.display());
+                } else {
+                    println!("streaming     INCOMPLETE at {}", dir.display());
+                    println!(
+                        "  fix         hippo-voice model download --streaming (falls back to phrase chunks)"
+                    );
+                }
+            }
+            Err(error) => println!("streaming     unreadable: {error}"),
+        },
+        Err(error) => println!("streaming     MISSING: {error}"),
+    }
+
     println!("session       {}", session_name());
 
     match capture::input_devices() {
@@ -300,20 +332,42 @@ fn doctor() -> Result<()> {
 }
 
 fn model_command(command: ModelCommand) -> Result<()> {
-    let lock = model::lock()?;
-    let dir = model_dir()?;
+    let streaming = match command {
+        ModelCommand::Status { streaming }
+        | ModelCommand::Verify { streaming }
+        | ModelCommand::Download { streaming } => streaming,
+    };
+    let lock = if streaming {
+        model::streaming_lock()?
+    } else {
+        model::lock()?
+    };
+    let dir = if streaming {
+        model::streaming_dir()?
+    } else {
+        model::resolve_dir()?
+    };
+    let rerun = if streaming {
+        "hippo-voice model download --streaming"
+    } else {
+        "hippo-voice model download"
+    };
     match command {
-        ModelCommand::Status => {
+        ModelCommand::Status { .. } => {
             println!("package       {} ({})", lock.version, lock.dir);
             println!("licence       {}", lock.license);
             println!("attribution   {}", lock.attribution);
             println!("directory     {}", dir.display());
-            let rows = model::inspect(&dir, false)?;
+            let rows = if streaming {
+                model::inspect_streaming(&dir, false)?
+            } else {
+                model::inspect(&dir, false)?
+            };
             let mut total = 0u64;
             for (file, state, bytes) in rows {
                 total += bytes;
                 println!(
-                    "  {:<20} {:<8} {} MiB",
+                    "  {:<52} {:<8} {} MiB",
                     file.name,
                     state.arg(),
                     bytes / (1 << 20)
@@ -321,29 +375,36 @@ fn model_command(command: ModelCommand) -> Result<()> {
             }
             println!("total         {} MiB", total / (1 << 20));
         }
-        ModelCommand::Verify => {
-            let rows = model::inspect(&dir, true)?;
+        ModelCommand::Verify { .. } => {
+            let rows = if streaming {
+                model::inspect_streaming(&dir, true)?
+            } else {
+                model::inspect(&dir, true)?
+            };
             let mut bad = 0;
             for (file, state, bytes) in rows {
                 if state != model::State::Present {
                     bad += 1;
                 }
                 println!(
-                    "  {:<20} {:<8} {} MiB",
+                    "  {:<52} {:<8} {} MiB",
                     file.name,
                     state.arg(),
                     bytes / (1 << 20)
                 );
             }
             if bad > 0 {
-                anyhow::bail!("{bad} file(s) need downloading: hippo-voice model download");
+                anyhow::bail!("{bad} file(s) need downloading: {rerun}");
             }
             println!("ok");
         }
-        ModelCommand::Download => {
-            let (files, bytes) = model::download(&dir, &mut |name| {
-                eprintln!("  {name}");
-            })?;
+        ModelCommand::Download { .. } => {
+            let mut progress = |name: &str| eprintln!("  {name}");
+            let (files, bytes) = if streaming {
+                model::download_streaming(&dir, &mut progress)?
+            } else {
+                model::download(&dir, &mut progress)?
+            };
             println!(
                 "fetched {files} file(s), {} MiB, into {}",
                 bytes / (1 << 20),
