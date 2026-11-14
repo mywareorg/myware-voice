@@ -38,7 +38,12 @@ const WIDTH: i32 = 340;
 const HEIGHT: i32 = 116;
 const MARGIN: i32 = 16;
 const BARS: usize = SPECTRUM_BANDS;
-const TICK: Duration = Duration::from_millis(100);
+const TICK: Duration = Duration::from_millis(16);
+/// Per-frame easing toward the newest band value. Attack is quicker than decay
+/// so consonants register, but neither snaps: the daemon publishes bands at
+/// 10 Hz, and 60 Hz interpolation is what makes the meter look fluid.
+const ATTACK: f32 = 0.45;
+const DECAY: f32 = 0.10;
 
 /// The level history and timer the window procedure draws. The run loop owns
 /// the writes; `WM_PAINT` only reads a copy under the lock.
@@ -140,16 +145,13 @@ fn run(status: Arc<Mutex<Status>>) -> Result<()> {
                     ShowWindow(window, SW_SHOWNOACTIVATE);
                     shown = true;
                 }
-                // Fixed frequency columns, not a scrolling history: each band
-                // rises immediately and falls gently, so the meter moves
-                // vertically in place and reads as a spectrum.
+                // Fixed frequency columns, not a scrolling history. Ease each
+                // column toward the newest magnitude every frame instead of
+                // jumping at the daemon's 100 ms publication cadence.
                 for (index, level) in levels.iter_mut().enumerate() {
                     let target = bands.get(index).copied().unwrap_or(0.0);
-                    *level = if target > *level {
-                        target
-                    } else {
-                        *level * 0.82
-                    };
+                    let easing = if target > *level { ATTACK } else { DECAY };
+                    *level += (target - *level) * easing;
                 }
                 if let Ok(mut meter) = meter().lock() {
                     meter.levels = levels;
