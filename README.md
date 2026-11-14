@@ -56,6 +56,60 @@ transcript history — off by default, pruned after `history_days`, and deleted 
 
 Environment overrides: `HIPPO_VOICE_SHERPA_DIR`, `HIPPO_VOICE_MODEL_DIR`.
 
+## Install (Linux)
+
+The release tarball needs no root and no build tools:
+
+```bash
+tar -xzf hippo-voice-0.1.0-linux-x64.tar.gz
+cd hippo-voice-0.1.0-linux-x64
+./install.sh
+hippo-voice model download        # 640 MB, resumable, checksummed
+```
+
+`install.sh` puts the three binaries and the sherpa runtime in
+`~/.local/libexec/hippo-voice`, with symlinks in `~/.local/bin`, the hicolor icons
+under `~/.local/share/icons` and a launcher for the settings window in
+`~/.local/share/applications`. The library lives beside the binaries because the
+daemon looks for it next to itself before anywhere else.
+
+```bash
+./install.sh --prefix /some/place   # not the default prefix
+./install.sh --systemd              # also write a user unit; read the caveat below
+./install.sh --help
+```
+
+Then bind it, in `~/.config/sway/config` — see "Keybind and autostart" for why
+`--release` and `--no-repeat` matter:
+
+```
+exec hippo-voice daemon
+bindsym --release --no-repeat ctrl+space exec hippo-voice toggle
+bindsym --release --no-repeat ctrl+shift+space exec hippo-voice stream
+```
+
+`--systemd` writes `~/.config/systemd/user/hippo-voice.service` with the installed
+path substituted in. A user unit does **not** inherit the compositor's
+environment on Wayland, so without importing it the daemon comes up with no
+`WAYLAND_DISPLAY`, no `SWAYSOCK` and no session bus, and every transcript is
+copied into nothing:
+
+```
+exec systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP SWAYSOCK
+exec systemctl --user enable --now hippo-voice
+```
+
+Running the daemon straight from the sway config avoids the whole problem; the
+unit buys restarts and journal history, and costs that line.
+
+`uninstall.sh` removes the binaries, the launcher and the icons. The model, the
+config and the history stay unless `--purge` is given, because 640 MB is the
+expensive part of a setup.
+
+`packaging/PKGBUILD` is the AUR recipe, built from a tagged release with the
+sherpa runtime as a hashed second source. It is not submitted yet: that waits on
+a tag and a signing key.
+
 ## Configuration
 
 `config.toml` is read at startup and re-read whenever the file changes: one `stat`

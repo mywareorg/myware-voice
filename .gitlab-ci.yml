@@ -7,6 +7,10 @@
 # first. `check` does not link, so the missing linker on a Linux runner does not
 # matter, and `build.rs` is a no-op off Windows by design.
 #
+# `linux-release` builds what a sway user actually installs: both binaries, the
+# settings window, the sherpa runtime and the packaging, as one tarball. It is the
+# only job that proves `install.sh` has something to find.
+#
 # `windows-cross` cross-builds the shipped Windows executable on a Linux runner.
 #
 # All Windows dependencies are pure Rust or windows-sys, so mingw can link the
@@ -41,6 +45,41 @@ check:
     # bumped — which is when it should.
     - cargo test --workspace
     - cargo check -p hippo-voice --target x86_64-pc-windows-msvc
+
+linux-release:
+  stage: build
+  image: rust:1-bookworm
+  interruptible: true
+  cache:
+    key: linux-release
+    paths:
+      - /usr/local/cargo/registry/
+  script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends pkg-config libasound2-dev libxkbcommon-dev libwayland-dev bzip2 curl ca-certificates
+    # The workspace: the tarball carries the settings window too, and the tray
+    # launches it from the daemon's own directory.
+    - cargo build --release --workspace --locked
+    - ./scripts/fetch-sherpa.sh
+    - version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+    - stage="dist/hippo-voice-$version-linux-x64"
+    - mkdir -p "$stage" "$stage/systemd"
+    - cp target/release/hippo-voice target/release/hippo-voice-daemon target/release/hippo-voice-settings "$stage/"
+    # sherpa-onnx and onnxruntime stay together: $ORIGIN rpath.
+    - cp -R vendor/sherpa/lib "$stage/lib"
+    - cp -R packaging/hicolor "$stage/hicolor"
+    - cp packaging/hippo-voice.desktop packaging/PKGBUILD "$stage/"
+    - cp packaging/systemd/hippo-voice.service "$stage/systemd/"
+    # install.sh looks for the binaries beside itself, which is how the extracted
+    # folder is laid out; uninstall.sh and the docs come along for the ride.
+    - cp scripts/install.sh scripts/uninstall.sh README.md LICENSE CONTRIBUTING.md models.lock models-streaming.lock sherpa.lock "$stage/"
+    - tar -czf "dist/hippo-voice-$version-linux-x64.tar.gz" -C dist "hippo-voice-$version-linux-x64"
+    - tar -tzf "dist/hippo-voice-$version-linux-x64.tar.gz"
+  artifacts:
+    name: hippo-voice-linux-$CI_COMMIT_SHORT_SHA
+    paths:
+      - dist/*.tar.gz
+    expire_in: 30 days
 
 windows-cross:
   stage: build

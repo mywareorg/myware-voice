@@ -1,0 +1,35 @@
+# The daemon as a user service.
+#
+# A caveat that costs an afternoon if it is missed: a `systemctl --user` unit does
+# not inherit the compositor's environment on Wayland, so the daemon starts with
+# no WAYLAND_DISPLAY, no SWAYSOCK and no session bus. wl-copy, wtype and swaymsg
+# then all fail and every transcript is "copied" into nothing.
+#
+# Import the environment from the compositor first, in the sway config:
+#
+#   exec systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP SWAYSOCK
+#   exec systemctl --user start hippo-voice
+#
+# Starting the daemon from the sway config alone — `exec hippo-voice daemon` — is
+# simpler and needs none of this. Use the unit when you want restarts and journal
+# history, and keep the import-environment line next to it.
+[Unit]
+Description=Hippo Voice dictation daemon
+Documentation=https://gitlab.com/librewarelive/hippo-voice
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# The installed layout: real binaries and the sherpa runtime in libexec, symlinks
+# on PATH. install.sh rewrites this line for a non-default prefix.
+ExecStart=%h/.local/libexec/hippo-voice/hippo-voice daemon
+Restart=on-failure
+# A crash loop is more useful as a log than as a hundred restarts a minute.
+RestartSec=2
+# A panic in the decoder is contained in the daemon; a panic anywhere else should
+# leave a backtrace in the journal.
+Environment=RUST_BACKTRACE=1
+
+[Install]
+WantedBy=graphical-session.target
