@@ -6,8 +6,9 @@ goes to the clipboard and is pasted into the window you were typing in.
 Local-only. The audio never leaves the machine; there are no accounts, no
 telemetry, and no network use after the model is installed.
 
-**Status: M0.** `doctor` and `transcribe` work. The daemon and the keybind come
-next.
+**Status:** works end to end on sway/Wayland. The Windows build compiles and is
+type-checked but has not been run; streaming dictation is reachable from the
+Windows hotkey only, so `stream_*` in the config does nothing on sway yet.
 
 ## What it uses
 
@@ -53,9 +54,37 @@ transcript history — off by default, pruned after `history_days`, and deleted 
 
 Environment overrides: `HIPPO_VOICE_SHERPA_DIR`, `HIPPO_VOICE_MODEL_DIR`.
 
+## Configuration
+
+`config.toml` is read at startup and re-read whenever the file changes: one `stat`
+per tick, and the file again only when its size or timestamp moved. Edits are
+applied immediately when idle, or at the start of the next capture if one is
+already running, so a change never swaps the microphone or the tones under a
+recording in progress. Deleting the file restores the defaults.
+
+A file that will not parse leaves the last good config in force and is reported
+rather than reset, in `hippo-voice status` and in the log:
+
+```
+config: parse /home/me/.config/hippo-voice/config.toml: unknown variant `nonsense`
+```
+
+`hippo-voice status` also reports the applied paste method and the revision
+number, which is the fastest way to confirm an edit landed:
+
+```
+idle 0.0s
+hotkey: compositor binding
+paste: ydotool
+config: revision 3
+```
+
+Hotkeys are the exception: the Windows daemon registers its chords at startup, so
+a new chord needs a restart. Nothing else does.
+
 ## Testing
 
-Three environment variables let the whole pipeline run with no microphone and no
+Four environment variables let the whole pipeline run with no microphone and no
 model, which is how `tests/daemon.rs` drives a real daemon over its real socket
 on CI:
 
@@ -63,6 +92,8 @@ on CI:
 - `HIPPO_VOICE_FAKE_MODEL` — the transcript to return instead of decoding.
 - `HIPPO_VOICE_FAKE_DELIVERY` — skip the clipboard and paste, so no external tool
   or focused window is needed.
+- `HIPPO_VOICE_CONFIG` — the config file, named outright rather than derived from
+  `XDG_CONFIG_HOME`, so a test can move just the config and rewrite it mid-run.
 
 ## Measured
 
@@ -116,8 +147,7 @@ never copied, because a newline pasted into a terminal executes a command.
 
 `hippo-voice-settings` is a separate binary, built against `hippo-ui`, that edits
 `config.toml` and exits. It never talks to the running daemon over its socket: the
-daemon reads the file on the next capture, so there is no reload protocol to get
-wrong.
+daemon watches the file, so there is no reload protocol to get wrong.
 
 ```bash
 cargo run -p hippo-voice-settings
@@ -129,10 +159,11 @@ bar. `scripts/make-app-icons.py` derives every shipped size from
 Linux hicolor tree under `packaging/`.
 
 Two panes: settings, and the transcripts kept when "Keep history" is on. It reads
-`config.toml` and `history.tsv` and writes only the former, so the daemon needs no
-reload protocol. The Windows hotkey is editable there; a chord it cannot parse is
-reported instead of saved. The daemon picks up the file on its next capture, which
-means a new chord needs a daemon restart.
+`config.toml` and `history.tsv` and writes only the former, editing the document
+in place so a key it does not recognise and the comments around it survive a save.
+The Windows hotkey is editable there; a chord it cannot parse is reported instead
+of saved. Everything except the hotkeys takes effect without a restart — see
+"Configuration" above.
 
 It is the second consumer of `hippo-ui` and the reason that library has a
 gallery and a style snapshot.

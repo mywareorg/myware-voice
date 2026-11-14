@@ -182,6 +182,17 @@ fn main() -> Result<()> {
             if let Some(hotkey) = reply.hotkey {
                 println!("hotkey: {hotkey}");
             }
+            if let Some(paste) = reply.paste {
+                println!("paste: {paste}");
+            }
+            // Revision zero is the file as it was at startup; only a reload is
+            // worth saying out loud.
+            if let Some(revision) = reply.config_revision.filter(|revision| *revision > 0) {
+                println!("config: revision {revision}");
+            }
+            if let Some(error) = reply.config_error {
+                println!("config: {error}");
+            }
             if let Some(text) = reply.text {
                 println!("last: {text}");
             }

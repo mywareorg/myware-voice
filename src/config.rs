@@ -4,6 +4,7 @@
 //! file is optional: a missing file means the defaults.
 
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -148,6 +149,34 @@ impl Config {
     }
 }
 
+/// A cheap "has this file changed" marker.
+///
+/// The daemon polls this on its tick rather than watching the file: one `stat`
+/// is cheaper than an inotify watch that has to be torn down and rebuilt every
+/// time a settings window rewrites the file with a fresh inode. The length is
+/// carried alongside the mtime because a filesystem with one-second timestamps
+/// would otherwise miss an edit that did not change the file's size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamp {
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+impl Stamp {
+    /// `None` when the file is not there.
+    ///
+    /// That is a state worth noticing rather than an error: deleting
+    /// `config.toml` is how a user gets the defaults back, and it has to take
+    /// effect like any other edit.
+    pub fn of(path: &Path) -> Option<Self> {
+        let meta = std::fs::metadata(path).ok()?;
+        Some(Self {
+            modified: meta.modified().ok(),
+            len: meta.len(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +196,26 @@ mod tests {
         let parsed: Config = toml::from_str("paste = \"none\"\n").expect("parse");
         assert_eq!(parsed.paste, PasteMethod::None);
         assert_eq!(parsed.chunk_seconds, Config::default().chunk_seconds);
+    }
+
+    #[test]
+    fn a_stamp_notices_a_rewrite_and_a_deletion() {
+        let path = std::env::temp_dir().join(format!("hippo-voice-stamp-{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(Stamp::of(&path), None, "a missing file has no stamp");
+
+        std::fs::write(&path, "paste = \"none\"\n").expect("write");
+        let first = Stamp::of(&path).expect("stamp");
+        // A different length, so this cannot pass on an mtime alone: filesystems
+        // with one-second timestamps are exactly why the length is carried.
+        std::fs::write(&path, "paste = \"ydotool\"\n").expect("rewrite");
+        assert_ne!(Stamp::of(&path).expect("stamp"), first);
+
+        std::fs::remove_file(&path).expect("remove");
+        assert_eq!(
+            Stamp::of(&path),
+            None,
+            "deleting the file is how the defaults come back"
+        );
     }
 }

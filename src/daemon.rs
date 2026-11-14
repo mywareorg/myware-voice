@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::audio;
 use crate::capture::Recorder;
-use crate::config::Config;
+use crate::config::{Config, Stamp};
 use crate::inject::{self, Focus};
 use crate::log;
 use crate::sherpa::Sherpa;
@@ -99,6 +99,18 @@ pub struct Status {
     /// Whether the current capture commits phrases while the user speaks.
     #[serde(default)]
     pub streaming: bool,
+    /// How a transcript is delivered, as configured. Mirrors `config.toml` so
+    /// `hippo-voice status` can answer "which paste tool is it actually using".
+    #[serde(default)]
+    pub paste: String,
+    /// Bumped every time an edited `config.toml` is applied, so a client can tell
+    /// that a save has landed. Hotkey changes still need a restart.
+    #[serde(default)]
+    pub config_revision: u64,
+    /// Why the last re-read of `config.toml` failed, if it did. The last good
+    /// config stays in force.
+    #[serde(default)]
+    pub config_error: Option<String>,
 }
 
 /// Columns in the popup's frequency meter.
@@ -116,6 +128,9 @@ impl Default for Status {
             level: 0.0,
             bands: Vec::new(),
             streaming: false,
+            paste: String::new(),
+            config_revision: 0,
+            config_error: None,
         }
     }
 }
@@ -169,6 +184,12 @@ pub struct Reply {
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hotkey: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paste: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_revision: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -301,6 +322,16 @@ enum DecodeJob {
 
 struct Daemon {
     config: Config,
+    /// Where the config came from and whether the file has changed since it was
+    /// read. `None` when there was no file at the last look.
+    config_path: PathBuf,
+    config_stamp: Option<Stamp>,
+    /// A config read while a capture was in flight. Swapping the device or the
+    /// tones under a recording is not something the user asked for, so it waits
+    /// for the next capture.
+    pending_config: Option<Config>,
+    config_revision: u64,
+    config_error: Option<String>,
     jobs: Sender<DecodeJob>,
     status: Arc<Mutex<Status>>,
     recorder: Option<Recorder>,
@@ -417,6 +448,11 @@ impl Daemon {
     }
 
     fn start_recording(&mut self, streaming: bool) -> Result<()> {
+        // An edit that arrived mid-capture lands here, before anything reads the
+        // config for the new recording.
+        if let Some(config) = self.pending_config.take() {
+            self.apply_config(config);
+        }
         let recorder = Recorder::start(self.config.device.as_deref())?;
         let device = recorder.device().to_string();
         // Bumping the generation is what cancels a decode that is still running.
@@ -993,6 +1029,64 @@ impl Daemon {
         }
     }
 
+    /// Re-read `config.toml` when the file has changed on disk.
+    ///
+    /// The settings window writes the file and exits, so this is what makes that
+    /// write mean anything without a restart. A parse failure keeps the last good
+    /// config in force and reports why in `status`: a typo in a hand-edit must
+    /// not silently reset every setting the user has.
+    fn reload_config(&mut self) {
+        let stamp = Stamp::of(&self.config_path);
+        if stamp == self.config_stamp {
+            return;
+        }
+        // Remember the stamp before parsing, so a broken file is reported once
+        // rather than on every tick.
+        self.config_stamp = stamp;
+        match Config::load_from(&self.config_path) {
+            Ok(config) => {
+                let phase = self.status.lock().map(|s| s.phase).unwrap_or(Phase::Idle);
+                if phase == Phase::Idle {
+                    self.apply_config(config);
+                } else {
+                    self.pending_config = Some(config);
+                    log::write("config read; waiting for the capture to finish");
+                }
+            }
+            Err(error) => {
+                // The status field is already labelled `config:`, so it carries
+                // the reason alone; the log keeps the sentence that explains it.
+                let message = format!("{error:#}");
+                note_error(&format!("config not applied: {message}"));
+                self.config_error = Some(message.clone());
+                if let Ok(mut status) = self.status.lock() {
+                    status.config_error = Some(message);
+                }
+            }
+        }
+    }
+
+    /// Put a config in force and record that it landed.
+    fn apply_config(&mut self, config: Config) {
+        let previous = std::mem::replace(&mut self.config, config);
+        self.config_revision += 1;
+        self.config_error = None;
+        let revision = self.config_revision;
+        if let Ok(mut status) = self.status.lock() {
+            status.config_revision = revision;
+            status.config_error = None;
+            status.paste = self.config.paste.to_string();
+        }
+        log::write(&format!("config applied (revision {revision})"));
+        // The Windows hotkey thread holds the chords it registered at startup.
+        // Nothing re-registers them, so say so instead of pretending.
+        if previous.hotkey != self.config.hotkey
+            || previous.stream_hotkey != self.config.stream_hotkey
+        {
+            note("a hotkey change needs a daemon restart");
+        }
+    }
+
     /// Drop the warm model after a long idle. The next capture reloads it while
     /// the user is already speaking, so the cost is hidden.
     fn unload_if_idle(&mut self) {
@@ -1139,8 +1233,9 @@ fn silent_tail(samples: &[f32], rate: u32) -> bool {
     energy.sqrt() < 0.008
 }
 
-/// Load the configuration and the model location, then run. This is what both
-/// `hippo-voice daemon` and the `hippo-voice-daemon` binary call.
+/// Find the model location, then run. This is what both `hippo-voice daemon` and
+/// the `hippo-voice-daemon` binary call; the configuration is read inside `run`,
+/// which also re-reads it when the file changes.
 pub fn run_process() -> Result<()> {
     crate::log::write(&format!(
         "daemon: starting {} ({})",
@@ -1151,7 +1246,6 @@ pub fn run_process() -> Result<()> {
             "release"
         }
     ));
-    let config = Config::load()?;
     // With a fake recognizer there is no model to find, which is how the daemon
     // is tested on a machine that has never downloaded one.
     let model = if std::env::var_os("HIPPO_VOICE_FAKE_MODEL").is_some() {
@@ -1159,11 +1253,26 @@ pub fn run_process() -> Result<()> {
     } else {
         crate::model::resolve_dir()?
     };
-    run(config, model, 4)
+    run(model, 4)
 }
 
 /// Run the daemon in the foreground until it is killed.
-pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
+///
+/// The config is resolved and read here rather than passed in: the tick re-reads
+/// it whenever the file changes, so this is the one place that decides where it
+/// lives, and a file that will not parse must leave the daemon running on the
+/// defaults instead of refusing to start.
+pub fn run(model_dir: PathBuf, threads: i32) -> Result<()> {
+    let config_path = Config::path()?;
+    let (config, config_error) = match Config::load_from(&config_path) {
+        Ok(config) => (config, None),
+        Err(error) => {
+            let message = format!("config not read; using the defaults: {error:#}");
+            note_error(&message);
+            (Config::default(), Some(message))
+        }
+    };
+    let config_stamp = Stamp::of(&config_path);
     if let Some(dir) = transport::endpoint_path()?.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -1180,6 +1289,8 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
         } else {
             "compositor binding".to_string()
         });
+        view.paste = config.paste.to_string();
+        view.config_error = config_error.clone();
     }
 
     #[cfg(windows)]
@@ -1224,6 +1335,11 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
 
     let mut daemon = Daemon {
         config,
+        config_path,
+        config_stamp,
+        pending_config: None,
+        config_revision: 0,
+        config_error,
         jobs: jobs_tx,
         status,
         recorder: None,
@@ -1258,6 +1374,7 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
+                daemon.reload_config();
                 daemon.refresh_seconds();
                 daemon.stream_tick();
                 daemon.unload_if_idle();
@@ -1324,6 +1441,9 @@ fn serve(
                 device: None,
                 text: None,
                 hotkey: None,
+                paste: None,
+                config_revision: None,
+                config_error: None,
                 error: None,
             }
         }
@@ -1338,6 +1458,9 @@ fn serve(
                 device: None,
                 text: None,
                 hotkey: None,
+                paste: None,
+                config_revision: None,
+                config_error: None,
                 error: None,
             }
         }
@@ -1352,6 +1475,9 @@ fn serve(
                 device: Some(snapshot.device),
                 text: snapshot.last_text,
                 hotkey: snapshot.hotkey,
+                paste: Some(snapshot.paste),
+                config_revision: Some(snapshot.config_revision),
+                config_error: snapshot.config_error,
                 error: None,
             }
         }
@@ -1364,6 +1490,9 @@ fn serve(
             device: None,
             text: None,
             hotkey: None,
+            paste: None,
+            config_revision: None,
+            config_error: None,
             error: Some(format!("unknown command {other:?}")),
         },
     };
