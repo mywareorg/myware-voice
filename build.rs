@@ -11,10 +11,10 @@ fn main() {
     {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("icons/app.ico");
-        res.set("ProductName", "Hippo Voice");
+        res.set("ProductName", "Hippo Dictate");
         res.set(
             "FileDescription",
-            "Hippo Voice \u{2014} push-to-talk dictation",
+            "Hippo Dictate \u{2014} push-to-talk dictation",
         );
         res.set("CompanyName", "Sean Wu");
         res.set("LegalCopyright", "Copyright (C) 2026 Sean Wu");

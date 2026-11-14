@@ -184,7 +184,7 @@ pub fn unavailable() -> Option<String> {
     // The fake-delivery seam skips the clipboard and the paste entirely, which is
     // how the state machine is tested on a machine that has neither. Asking for
     // tools that run would never be used would fail every such test.
-    if std::env::var_os("HIPPO_VOICE_FAKE_DELIVERY").is_some() {
+    if std::env::var_os("HIPPO_DICTATE_FAKE_DELIVERY").is_some() {
         return None;
     }
     if have("wl-copy") {
@@ -200,7 +200,7 @@ pub fn unavailable() -> Option<String> {
 
 /// The focused window, from whichever compositor can say.
 pub fn focus() -> Option<Focus> {
-    if let Some(spec) = std::env::var_os("HIPPO_VOICE_FAKE_FOCUS") {
+    if let Some(spec) = std::env::var_os("HIPPO_DICTATE_FAKE_FOCUS") {
         return Some(parse_fake(&spec.to_string_lossy()));
     }
     match session() {
@@ -210,7 +210,7 @@ pub fn focus() -> Option<Focus> {
     }
 }
 
-/// `app_id:window_id`, the form `HIPPO_VOICE_FAKE_FOCUS` takes. A spec without a
+/// `app_id:window_id`, the form `HIPPO_DICTATE_FAKE_FOCUS` takes. A spec without a
 /// colon has no window id, which is the "provider that only knows the
 /// application" case.
 fn parse_fake(spec: &str) -> Focus {
@@ -310,7 +310,7 @@ pub fn notify(summary: &str, body: &str) {
         return;
     }
     let _ = Command::new("notify-send")
-        .args(["-a", "hippo-voice", summary, body])
+        .args(["-a", "hippo-dictate", summary, body])
         .status();
 }
 

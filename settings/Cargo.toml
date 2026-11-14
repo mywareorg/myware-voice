@@ -1,20 +1,20 @@
 [package]
-name = "hippo-voice-settings"
-version = "0.1.0"
+name = "hippo-dictate-settings"
+version = "0.2.0"
 edition = "2021"
-description = "Settings window for hippo-voice."
+description = "Settings window for hippo-dictate."
 license = "LGPL-2.1-only"
-repository = "https://gitlab.com/librewarelive/hippo-voice"
+repository = "https://gitlab.com/librewarelive/hippo-dictate"
 
 [[bin]]
-name = "hippo-voice-settings"
+name = "hippo-dictate-settings"
 path = "src/main.rs"
 
 [dependencies]
 # The config file is the contract between this window and the daemon; it is the
 # only reason this binary depends on the daemon crate, and it never talks to the
 # running daemon over its socket.
-hippo-voice = { path = ".." }
+hippo-dictate = { path = ".." }
 # Pinned to a commit, not `branch = "main"`: the settings window is a separate
 # binary that no test builds, so a moving branch breaks it silently. Bump the
 # rev deliberately, with the build checked.

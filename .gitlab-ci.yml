@@ -44,7 +44,7 @@ check:
     # pinned rev rather than by branch, so this can only break when the rev is
     # bumped — which is when it should.
     - cargo test --workspace
-    - cargo check -p hippo-voice --target x86_64-pc-windows-msvc
+    - cargo check -p hippo-dictate --target x86_64-pc-windows-msvc
 
 linux-release:
   stage: build
@@ -62,21 +62,21 @@ linux-release:
     - cargo build --release --workspace --locked
     - ./scripts/fetch-sherpa.sh
     - version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-    - stage="dist/hippo-voice-$version-linux-x64"
+    - stage="dist/hippo-dictate-$version-linux-x64"
     - mkdir -p "$stage" "$stage/systemd"
-    - cp target/release/hippo-voice target/release/hippo-voice-daemon target/release/hippo-voice-settings "$stage/"
+    - cp target/release/hippo-dictate target/release/hippo-dictate-daemon target/release/hippo-dictate-settings "$stage/"
     # sherpa-onnx and onnxruntime stay together: $ORIGIN rpath.
     - cp -R vendor/sherpa/lib "$stage/lib"
     - cp -R packaging/hicolor "$stage/hicolor"
-    - cp packaging/hippo-voice.desktop packaging/PKGBUILD "$stage/"
-    - cp packaging/systemd/hippo-voice.service "$stage/systemd/"
+    - cp packaging/hippo-dictate.desktop packaging/PKGBUILD "$stage/"
+    - cp packaging/systemd/hippo-dictate.service "$stage/systemd/"
     # install.sh looks for the binaries beside itself, which is how the extracted
     # folder is laid out; uninstall.sh and the docs come along for the ride.
     - cp scripts/install.sh scripts/uninstall.sh README.md LICENSE CONTRIBUTING.md models.lock models-streaming.lock sherpa.lock "$stage/"
-    - tar -czf "dist/hippo-voice-$version-linux-x64.tar.gz" -C dist "hippo-voice-$version-linux-x64"
-    - tar -tzf "dist/hippo-voice-$version-linux-x64.tar.gz"
+    - tar -czf "dist/hippo-dictate-$version-linux-x64.tar.gz" -C dist "hippo-dictate-$version-linux-x64"
+    - tar -tzf "dist/hippo-dictate-$version-linux-x64.tar.gz"
   artifacts:
-    name: hippo-voice-linux-$CI_COMMIT_SHORT_SHA
+    name: hippo-dictate-linux-$CI_COMMIT_SHORT_SHA
     paths:
       - dist/*.tar.gz
     expire_in: 30 days
@@ -102,31 +102,31 @@ windows-cross:
     - apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 curl ca-certificates pkg-config libasound2-dev
     - rustup target add x86_64-pc-windows-gnu
     # Tests run on the host: a Windows binary cannot execute on this runner.
-    - cargo test -p hippo-voice
+    - cargo test -p hippo-dictate
     # Only the daemon crate: the settings window pulls iced and wgpu, which are
     # built by scripts/build-windows.ps1 on a real Windows machine instead.
-    - cargo build --release -p hippo-voice --target x86_64-pc-windows-gnu
+    - cargo build --release -p hippo-dictate --target x86_64-pc-windows-gnu
     - curl -fSL --retry 3 -o "/tmp/$SHERPA.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$SHERPA.tar.bz2"
     - tar -xjf "/tmp/$SHERPA.tar.bz2" -C /tmp
     - mkdir -p dist
-    - cp target/x86_64-pc-windows-gnu/release/hippo-voice.exe dist/
-    - cp target/x86_64-pc-windows-gnu/release/hippo-voice-daemon.exe dist/
+    - cp target/x86_64-pc-windows-gnu/release/hippo-dictate.exe dist/
+    - cp target/x86_64-pc-windows-gnu/release/hippo-dictate-daemon.exe dist/
     # Only the C API and its ONNX Runtime dependencies. The cxx API is a separate
     # library the app never loads.
     - cp "/tmp/$SHERPA/lib/sherpa-onnx-c-api.dll" "/tmp/$SHERPA/lib/onnxruntime.dll" "/tmp/$SHERPA/lib/onnxruntime_providers_shared.dll" dist/
     - cp README.md LICENSE models.lock dist/
     - cp scripts/install.ps1 scripts/uninstall.ps1 dist/
     # Print the import table, then fail if the mingw runtime leaked in.
-    - x86_64-w64-mingw32-objdump -p dist/hippo-voice.exe | grep 'DLL Name'
+    - x86_64-w64-mingw32-objdump -p dist/hippo-dictate.exe | grep 'DLL Name'
     - |
-      if x86_64-w64-mingw32-objdump -p dist/hippo-voice.exe |
+      if x86_64-w64-mingw32-objdump -p dist/hippo-dictate.exe |
          grep -qiE 'DLL Name: (libgcc_s_seh-1|libwinpthread-1)\.dll'; then
         echo "unexpected mingw runtime dependency; +crt-static did not take" >&2
         exit 1
       fi
     - ls -l dist
   artifacts:
-    name: hippo-voice-windows-$CI_COMMIT_SHORT_SHA
+    name: hippo-dictate-windows-$CI_COMMIT_SHORT_SHA
     paths:
       - dist/
     expire_in: 30 days

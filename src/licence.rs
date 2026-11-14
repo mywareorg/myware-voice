@@ -13,13 +13,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
-/// The key licences are signed with, from `HIPPO_VOICE_LICENCE_PUBKEY` at build
+/// The key licences are signed with, from `HIPPO_DICTATE_LICENCE_PUBKEY` at build
 /// time.
 ///
 /// Deliberately nothing in the repository: a default build has no key and
 /// therefore grants nothing, so a forked or rebuilt binary cannot manufacture
 /// licences. A release build sets the variable.
-pub const PUBLIC_KEY: Option<&str> = option_env!("HIPPO_VOICE_LICENCE_PUBKEY");
+pub const PUBLIC_KEY: Option<&str> = option_env!("HIPPO_DICTATE_LICENCE_PUBKEY");
 
 /// The line between the signed document and its signature.
 const SEAM: &str = "---";
@@ -96,9 +96,9 @@ impl Entitlement {
     }
 }
 
-/// The licence file, named outright by `HIPPO_VOICE_LICENCE` in a test.
+/// The licence file, named outright by `HIPPO_DICTATE_LICENCE` in a test.
 pub fn path() -> anyhow::Result<PathBuf> {
-    if let Some(path) = std::env::var_os("HIPPO_VOICE_LICENCE") {
+    if let Some(path) = std::env::var_os("HIPPO_DICTATE_LICENCE") {
         return Ok(PathBuf::from(path));
     }
     crate::dirs::licence_file()
@@ -160,7 +160,7 @@ pub fn verify(text: &str, key: Option<&str>, now: u64) -> Result<Claims, String>
     Ok(claims)
 }
 
-/// Sign a licence. Used by `hippo-voice licence sign`, which is how licences are
+/// Sign a licence. Used by `hippo-dictate licence sign`, which is how licences are
 /// issued; the key stays on the machine that issues them.
 pub fn sign(claims: &Claims, key: &SigningKey) -> String {
     let payload = toml::to_string(claims).expect("a licence payload always serialises");

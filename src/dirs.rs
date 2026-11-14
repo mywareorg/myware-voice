@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Result};
 
 /// The app's directory name under each base.
-const APP: &str = "hippo-voice";
+const APP: &str = "hippo-dictate";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -141,7 +141,7 @@ pub fn cache_dir() -> Result<PathBuf> {
 /// variables alone: a developer's environment would leak into the run. Naming
 /// the file directly is also the only way to move just the config and leave the
 /// log, socket and history where the rest of the suite expects them.
-const CONFIG_OVERRIDE: &str = "HIPPO_VOICE_CONFIG";
+const CONFIG_OVERRIDE: &str = "HIPPO_DICTATE_CONFIG";
 
 pub fn config_file() -> Result<PathBuf> {
     config_file_from(&|key| std::env::var_os(key))
@@ -221,19 +221,19 @@ mod tests {
         ]);
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Config, &env).unwrap(),
-            PathBuf::from("/xdg/config/hippo-voice")
+            PathBuf::from("/xdg/config/hippo-dictate")
         );
         assert_eq!(
             resolve_for(Family::Xdg, Kind::State, &env).unwrap(),
-            PathBuf::from("/xdg/state/hippo-voice")
+            PathBuf::from("/xdg/state/hippo-dictate")
         );
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Runtime, &env).unwrap(),
-            PathBuf::from("/xdg/run/hippo-voice")
+            PathBuf::from("/xdg/run/hippo-dictate")
         );
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Cache, &env).unwrap(),
-            PathBuf::from("/xdg/cache/hippo-voice")
+            PathBuf::from("/xdg/cache/hippo-dictate")
         );
     }
 
@@ -242,23 +242,23 @@ mod tests {
         let env = env_of(&[("HOME", "/home/me")]);
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Config, &env).unwrap(),
-            PathBuf::from("/home/me/.config/hippo-voice")
+            PathBuf::from("/home/me/.config/hippo-dictate")
         );
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Data, &env).unwrap(),
-            PathBuf::from("/home/me/.local/share/hippo-voice")
+            PathBuf::from("/home/me/.local/share/hippo-dictate")
         );
         // No runtime dir: the state directory stands in.
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Runtime, &env).unwrap(),
-            PathBuf::from("/home/me/.local/state/hippo-voice")
+            PathBuf::from("/home/me/.local/state/hippo-dictate")
         );
     }
 
     #[test]
     fn config_override_names_the_file_itself() {
         let env = env_of(&[
-            ("HIPPO_VOICE_CONFIG", "/tmp/elsewhere/config.toml"),
+            ("HIPPO_DICTATE_CONFIG", "/tmp/elsewhere/config.toml"),
             ("XDG_CONFIG_HOME", "/xdg/config"),
         ]);
         assert_eq!(
@@ -269,7 +269,7 @@ mod tests {
         let plain = env_of(&[("XDG_CONFIG_HOME", "/xdg/config")]);
         assert_eq!(
             config_file_from(&plain).unwrap(),
-            PathBuf::from("/xdg/config/hippo-voice/config.toml")
+            PathBuf::from("/xdg/config/hippo-dictate/config.toml")
         );
     }
 
@@ -282,22 +282,22 @@ mod tests {
         ]);
         assert_eq!(
             resolve_for(Family::Windows, Kind::Config, &env).unwrap(),
-            PathBuf::from(r"C:\Users\me\AppData\Roaming").join("hippo-voice")
+            PathBuf::from(r"C:\Users\me\AppData\Roaming").join("hippo-dictate")
         );
         assert_eq!(
             resolve_for(Family::Windows, Kind::State, &env).unwrap(),
-            PathBuf::from(r"C:\Users\me\AppData\Local").join("hippo-voice")
+            PathBuf::from(r"C:\Users\me\AppData\Local").join("hippo-dictate")
         );
         assert_eq!(
             resolve_for(Family::Windows, Kind::Cache, &env).unwrap(),
             PathBuf::from(r"C:\Users\me\AppData\Local")
-                .join("hippo-voice")
+                .join("hippo-dictate")
                 .join("cache")
         );
         // HOME is irrelevant there, and its absence must not be an error.
         assert_eq!(
             resolve_for(Family::Windows, Kind::Runtime, &env).unwrap(),
-            PathBuf::from(r"C:\Users\me\AppData\Local").join("hippo-voice")
+            PathBuf::from(r"C:\Users\me\AppData\Local").join("hippo-dictate")
         );
     }
 
@@ -306,7 +306,7 @@ mod tests {
         let profile = env_of(&[("USERPROFILE", r"C:\Users\me")]);
         assert_eq!(
             resolve_for(Family::Windows, Kind::Config, &profile).unwrap(),
-            PathBuf::from(r"C:\Users\me").join("hippo-voice")
+            PathBuf::from(r"C:\Users\me").join("hippo-dictate")
         );
 
         let empty = env_of(&[]);

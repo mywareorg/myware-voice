@@ -1,7 +1,7 @@
 //! Windows global hotkey.
 //!
 //! A command line cannot be run by a compositor on Windows the way sway runs
-//! `hippo-voice toggle`, so the daemon registers the chord itself.
+//! `hippo-dictate toggle`, so the daemon registers the chord itself.
 //! `RegisterHotKey` with a null window posts `WM_HOTKEY` to the calling thread's
 //! queue, so this needs a thread with a message loop rather than a window
 //! procedure.
@@ -29,7 +29,7 @@ const STREAM_HOTKEY_ID: i32 = 2;
 ///
 /// The outcome is written into the shared status either way: a daemon that looks
 /// alive but never fires is the worst failure this app can have, so a taken chord
-/// has to be visible in `hippo-voice status`.
+/// has to be visible in `hippo-dictate status`.
 pub fn spawn(
     events: Sender<Event>,
     chord: Chord,

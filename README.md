@@ -1,4 +1,4 @@
-# Hippo Voice
+# Hippo Dictate
 
 Push-to-talk dictation. Press the keybind, speak, press it again: the transcript
 goes to the clipboard and is pasted into the window you were typing in.
@@ -7,7 +7,7 @@ Local-only. The audio never leaves the machine; there are no accounts, no
 telemetry, and no network use after the model is installed.
 
 **Status:** works end to end on sway/Wayland, including streaming dictation
-(`hippo-voice stream`). The Windows build compiles and is type-checked but has
+(`hippo-dictate stream`). The Windows build compiles and is type-checked but has
 not been run.
 
 ## What it uses
@@ -31,8 +31,8 @@ differ between releases — the bindings assert their sizes against the pinned A
 ./scripts/fetch-model.sh      # 640 MB model    -> vendor/models
 
 cargo build
-./target/debug/hippo-voice doctor
-./target/debug/hippo-voice transcribe some.wav
+./target/debug/hippo-dictate doctor
+./target/debug/hippo-dictate transcribe some.wav
 ```
 
 `doctor` prints the resolved runtime, the model, the session type, whether the
@@ -57,21 +57,21 @@ at 1 MiB so a resident daemon cannot fill a disk. `history` prints the opt-in
 transcript history — off by default, pruned after `history_days`, and deleted by
 `history --clear`.
 
-Environment overrides: `HIPPO_VOICE_SHERPA_DIR`, `HIPPO_VOICE_MODEL_DIR`.
+Environment overrides: `HIPPO_DICTATE_SHERPA_DIR`, `HIPPO_DICTATE_MODEL_DIR`.
 
 ## Install (Linux)
 
 The release tarball needs no root and no build tools:
 
 ```bash
-tar -xzf hippo-voice-0.1.0-linux-x64.tar.gz
-cd hippo-voice-0.1.0-linux-x64
+tar -xzf hippo-dictate-0.2.0-linux-x64.tar.gz
+cd hippo-dictate-0.2.0-linux-x64
 ./install.sh
-hippo-voice model download        # 640 MB, resumable, checksummed
+hippo-dictate model download        # 640 MB, resumable, checksummed
 ```
 
 `install.sh` puts the three binaries and the sherpa runtime in
-`~/.local/libexec/hippo-voice`, with symlinks in `~/.local/bin`, the hicolor icons
+`~/.local/libexec/hippo-dictate`, with symlinks in `~/.local/bin`, the hicolor icons
 under `~/.local/share/icons` and a launcher for the settings window in
 `~/.local/share/applications`. The library lives beside the binaries because the
 daemon looks for it next to itself before anywhere else.
@@ -86,12 +86,12 @@ Then bind it, in `~/.config/sway/config` — see "Keybind and autostart" for why
 `--release` and `--no-repeat` matter:
 
 ```
-exec hippo-voice daemon
-bindsym --release --no-repeat ctrl+space exec hippo-voice toggle
-bindsym --release --no-repeat ctrl+shift+space exec hippo-voice stream
+exec hippo-dictate daemon
+bindsym --release --no-repeat ctrl+space exec hippo-dictate toggle
+bindsym --release --no-repeat ctrl+shift+space exec hippo-dictate stream
 ```
 
-`--systemd` writes `~/.config/systemd/user/hippo-voice.service` with the installed
+`--systemd` writes `~/.config/systemd/user/hippo-dictate.service` with the installed
 path substituted in. A user unit does **not** inherit the compositor's
 environment on Wayland, so without importing it the daemon comes up with no
 `WAYLAND_DISPLAY`, no `SWAYSOCK` and no session bus, and every transcript is
@@ -99,7 +99,7 @@ copied into nothing:
 
 ```
 exec systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP SWAYSOCK
-exec systemctl --user enable --now hippo-voice
+exec systemctl --user enable --now hippo-dictate
 ```
 
 Running the daemon straight from the sway config avoids the whole problem; the
@@ -122,13 +122,13 @@ already running, so a change never swaps the microphone or the tones under a
 recording in progress. Deleting the file restores the defaults.
 
 A file that will not parse leaves the last good config in force and is reported
-rather than reset, in `hippo-voice status` and in the log:
+rather than reset, in `hippo-dictate status` and in the log:
 
 ```
-config: parse /home/me/.config/hippo-voice/config.toml: unknown variant `nonsense`
+config: parse /home/me/.config/hippo-dictate/config.toml: unknown variant `nonsense`
 ```
 
-`hippo-voice status` also reports the applied paste method and the revision
+`hippo-dictate status` also reports the applied paste method and the revision
 number, which is the fastest way to confirm an edit landed:
 
 ```
@@ -173,7 +173,7 @@ text = "https://cal.example/sean"
 
 [[replacements]]
 from = "hippo"
-to = "Hippo Voice"
+to = "Hippo Dictate"
 ```
 
 The order is fixed: cleanup, then a command, then a snippet, then punctuation and
@@ -182,7 +182,7 @@ and an address is never broken by one. Capitalisation is left alone: Parakeet
 already sentence-cases its output, and a rule that re-cases would only be able to
 make it worse.
 
-`hippo-voice text "um, mail sean at sign example dot com"` runs the pass on a
+`hippo-dictate text "um, mail sean at sign example dot com"` runs the pass on a
 string and prints what would be pasted, which is the fastest way to check a
 dictionary rule.
 
@@ -195,7 +195,7 @@ user's attention is in the window they were typing in. A transcript that lands
 clears it. A missing model is caught at startup rather than at the first press:
 
 ```
-last error: no usable model in /home/me/.local/share/hippo-voice/models (missing encoder.int8.onnx, decoder.int8.onnx, joiner.int8.onnx, tokens.txt); run `hippo-voice model download`
+last error: no usable model in /home/me/.local/share/hippo-dictate/models (missing encoder.int8.onnx, decoder.int8.onnx, joiner.int8.onnx, tokens.txt); run `hippo-dictate model download`
 ```
 
 The decoder runs on its own thread behind a panic boundary: a panic costs one
@@ -208,18 +208,18 @@ Seven environment variables let the whole pipeline run with no microphone and no
 model, which is how `tests/daemon.rs` drives a real daemon over its real socket
 on CI:
 
-- `HIPPO_VOICE_FAKE_AUDIO` — a WAV replayed instead of the device.
-- `HIPPO_VOICE_FAKE_MODEL` — the transcript to return instead of decoding.
-- `HIPPO_VOICE_FAKE_DELIVERY` — skip the clipboard and paste, so no external tool
+- `HIPPO_DICTATE_FAKE_AUDIO` — a WAV replayed instead of the device.
+- `HIPPO_DICTATE_FAKE_MODEL` — the transcript to return instead of decoding.
+- `HIPPO_DICTATE_FAKE_DELIVERY` — skip the clipboard and paste, so no external tool
   or focused window is needed.
-- `HIPPO_VOICE_CONFIG` — the config file, named outright rather than derived from
+- `HIPPO_DICTATE_CONFIG` — the config file, named outright rather than derived from
   `XDG_CONFIG_HOME`, so a test can move just the config and rewrite it mid-run.
-- `HIPPO_VOICE_FAKE_DECODE` — break the fake decoder on purpose: `panic` fails the
+- `HIPPO_DICTATE_FAKE_DECODE` — break the fake decoder on purpose: `panic` fails the
   first decode, which is how the supervision around it is tested; `slow` delays
   every decode so a second press arrives mid-decode.
-- `HIPPO_VOICE_FAKE_FOCUS` — the focused window as `app:window`, so a test does
+- `HIPPO_DICTATE_FAKE_FOCUS` — the focused window as `app:window`, so a test does
   not need a compositor that can answer.
-- `HIPPO_VOICE_LICENCE` — the licence file, named outright.
+- `HIPPO_DICTATE_LICENCE` — the licence file, named outright.
 
 ## Measured
 
@@ -241,7 +241,7 @@ is a run that actually happened. Change `chunk_seconds` or `threads` with that i
 front of you, not from one warm cache.
 
 The daemon measures itself too. Every delivery records the stop press to the paste
-chord, and `hippo-voice status` prints it:
+chord, and `hippo-dictate status` prints it:
 
 ```
 timings: decode 380 ms · copy 12 ms · paste 9 ms · total 1180 ms
@@ -256,9 +256,9 @@ which is a different thing from a copy that took no time.
 In `~/.config/sway/config`:
 
 ```
-exec hippo-voice daemon
-bindsym --release --no-repeat ctrl+space exec hippo-voice toggle
-bindsym --release --no-repeat ctrl+shift+space exec hippo-voice stream
+exec hippo-dictate daemon
+bindsym --release --no-repeat ctrl+space exec hippo-dictate toggle
+bindsym --release --no-repeat ctrl+shift+space exec hippo-dictate stream
 ```
 
 `stream` is the same capture as `toggle`, except it pastes phrases as you speak
@@ -283,7 +283,7 @@ ydotool type ''
 ```
 
 Pin one with `paste = "wtype" | "ydotool" | "none"` in
-`$XDG_CONFIG_HOME/hippo-voice/config.toml`. To check injection by hand, focus a
+`$XDG_CONFIG_HOME/hippo-dictate/config.toml`. To check injection by hand, focus a
 text field and run:
 
 ```bash
@@ -313,12 +313,12 @@ the cost of not supporting X11 yet, and it is visible rather than silent.
 
 ## Settings window
 
-`hippo-voice-settings` is a separate binary, built against `hippo-ui`, that edits
+`hippo-dictate-settings` is a separate binary, built against `hippo-ui`, that edits
 `config.toml` and exits. It never talks to the running daemon over its socket: the
 daemon watches the file, so there is no reload protocol to get wrong.
 
 ```bash
-cargo run -p hippo-voice-settings
+cargo run -p hippo-dictate-settings
 ```
 
 It wears the original hippo in the header and the microphone mark in the title
@@ -338,8 +338,8 @@ gallery and a style snapshot.
 
 ## The socket
 
-`hippo-voice toggle` is a client of the daemon, over a Unix socket in
-`$XDG_RUNTIME_DIR/hippo-voice/` (a loopback port with a per-run token on Windows).
+`hippo-dictate toggle` is a client of the daemon, over a Unix socket in
+`$XDG_RUNTIME_DIR/hippo-dictate/` (a loopback port with a per-run token on Windows).
 Every request carries the wire version and every reply reports the daemon's, so a
 client and a daemon from different builds refuse each other with a sentence
 instead of reading a field that has changed meaning. Adding a field does not
@@ -373,20 +373,20 @@ deliberate, so a rebuilt or forked binary cannot manufacture licences. A release
 build names one:
 
 ```bash
-HIPPO_VOICE_LICENCE_PUBKEY=<64 hex characters> cargo build --release
+HIPPO_DICTATE_LICENCE_PUBKEY=<64 hex characters> cargo build --release
 ```
 
 Issuing is `licence keygen`, then `licence sign`, both hidden from `--help`
 because they are not things a user does:
 
 ```bash
-hippo-voice licence keygen > keys.txt        # keep the private line off this machine
-hippo-voice licence sign --subject someone@example.com --key private.key > licence
-hippo-voice licence show                    # what is in force here, and why not
+hippo-dictate licence keygen > keys.txt        # keep the private line off this machine
+hippo-dictate licence sign --subject someone@example.com --key private.key > licence
+hippo-dictate licence show                    # what is in force here, and why not
 ```
 
-`HIPPO_VOICE_LICENCE` names the file for a test; the installed one is
-`$XDG_DATA_HOME/hippo-voice/licence`. The daemon reads it at startup, so a
+`HIPPO_DICTATE_LICENCE` names the file for a test; the installed one is
+`$XDG_DATA_HOME/hippo-dictate/licence`. The daemon reads it at startup, so a
 licence dropped in while it runs applies after a restart.
 
 ## Windows
@@ -395,12 +395,12 @@ Install for the current user from the release folder — no administrator rights
 
 ```powershell
 .\install.ps1
-hippo-voice model download
+hippo-dictate model download
 ```
 
 `install.ps1` copies all three executables and the runtime DLLs to
-`%LOCALAPPDATA%\Programs\hippo-voice`, adds that folder to the user `PATH`,
-registers `hippo-voice-daemon.exe` under `HKCU\...\Run` so it starts at login
+`%LOCALAPPDATA%\Programs\hippo-dictate`, adds that folder to the user `PATH`,
+registers `hippo-dictate-daemon.exe` under `HKCU\...\Run` so it starts at login
 without a console window, starts it, and prints `doctor`. The daemon also adds a
 **notification-area icon**: left click opens the settings window, right click
 opens a menu with settings, recent transcripts, **Toggle dictation** and Quit.
@@ -424,7 +424,7 @@ Or build the release folder in one command from a checkout:
 It enters the Visual Studio developer environment when `link.exe` is not already
 on `PATH`, fetches the runtime if absent, runs the tests, builds both executables,
 stages the Visual C++ runtime so a clean machine can start the exe, and writes
-`dist\hippo-voice-<version>-win-x64` plus a zip of it. `-SkipTests`, `-Dev`, `-NoZip` and `-WithModel` are the useful switches; the
+`dist\hippo-dictate-<version>-win-x64` plus a zip of it. `-SkipTests`, `-Dev`, `-NoZip` and `-WithModel` are the useful switches; the
 640 MB model is not bundled unless you ask.
 
 Delivery uses `SendInput`. A window running elevated — an administrator console,
@@ -442,7 +442,7 @@ run.** What is wired:
 
 - The daemon registers `ctrl+space` itself with `RegisterHotKey` on a thread with
   a message loop, because a shortcut cannot launch a command line the way sway
-  launches `hippo-voice toggle`. While it runs, that chord is owned system-wide,
+  launches `hippo-dictate toggle`. While it runs, that chord is owned system-wide,
   so the input-method switch on some layouts and editor autocomplete stop
   reaching their applications; `hotkey = "ctrl+alt+space"` in `config.toml`
   trades the shorter chord for that. The settings window has the same field.
@@ -458,14 +458,14 @@ run.** What is wired:
   Either way the session stops if focus changes, because continuing would paste
   into the wrong window. `stream_hotkey`, `stream_seconds`,
   `stream_segment_seconds`, `stream_online` and
-  `HIPPO_VOICE_STREAMING_MODEL_DIR` are config knobs.
+  `HIPPO_DICTATE_STREAMING_MODEL_DIR` are config knobs.
 - The transport is loopback TCP on an ephemeral port with a per-run token in the
   state directory: an open port is not authority to open a microphone.
 - Delivery is `arboard` for the clipboard and `enigo` (`SendInput`) for the chord.
 - There is no toast equivalent of `notify-send` yet; failures go to the log.
 
-Files follow the platform: `%APPDATA%\hippo-voice` for configuration and
-`%LOCALAPPDATA%\hippo-voice` for logs, the endpoint file, models and cache.
+Files follow the platform: `%APPDATA%\hippo-dictate` for configuration and
+`%LOCALAPPDATA%\hippo-dictate` for logs, the endpoint file, models and cache.
 (`HOME` is usually unset on Windows, which is why nothing resolved there before.)
 
 Fetch the native pieces with the PowerShell equivalents:
@@ -477,7 +477,7 @@ Fetch the native pieces with the PowerShell equivalents:
 
 `fetch-sherpa.ps1` pulls the 6.6 MB `MD-Release` archive — the only Windows build
 published — and extracts it with an installed 7-Zip, Git for Windows' `bzip2`, or
-a standalone 7-Zip it downloads to `%LOCALAPPDATA%\hippo-voice\cache`. The
+a standalone 7-Zip it downloads to `%LOCALAPPDATA%\hippo-dictate\cache`. The
 built-in `tar` has no bzip2, so it cannot do this alone.
 Both DLLs and `onnxruntime_providers_shared.dll` must sit beside the executable:
 Windows resolves a DLL's imports from the application directory, not from the DLL.
@@ -491,21 +491,21 @@ daemon with one command:
 
 It enters the Visual Studio environment when `link.exe` is missing, fetches the
 runtime if it is absent, warns when the model is missing (`-WithModel` fetches
-it), builds the whole workspace so `hippo-voice-settings.exe` exists beside the
-daemon, and then runs `cargo run --bin hippo-voice-daemon`. The daemon is a
+it), builds the whole workspace so `hippo-dictate-settings.exe` exists beside the
+daemon, and then runs `cargo run --bin hippo-dictate-daemon`. The daemon is a
 GUI-subsystem binary, so no console window survives the launch; the terminal
 stays with cargo until you Quit from the tray. `-Release` uses the release
 profile. `-WithStreamingModel` fetches the optional word-by-word package.
 `-Force` stops a running daemon or Settings window before building; without it,
 the script refuses with the process list because Windows cannot replace a
 running executable. The equivalent without the preflight checks is
-`cargo build --workspace` followed by `cargo run --bin hippo-voice-daemon`; the
+`cargo build --workspace` followed by `cargo run --bin hippo-dictate-daemon`; the
 workspace build matters because the tray launches the settings executable from
 the daemon's own directory.
 
-A startup failure is written to `%LOCALAPPDATA%\hippo-voice\log`; the script
+A startup failure is written to `%LOCALAPPDATA%\hippo-dictate\log`; the script
 prints the tail when cargo exits non-zero. Errors from the dev build are also
-appended to `hippo-voice-error.log` in the checkout root — that file is
+appended to `hippo-dictate-error.log` in the checkout root — that file is
 gitignored, capped at 256 KB, and is the one to send back. Closing the terminal
 does not necessarily stop a GUI-subsystem daemon, so Quit from the tray before
 starting another one - the script detects a live endpoint and says so rather than

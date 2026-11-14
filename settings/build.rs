@@ -7,14 +7,14 @@ fn main() {
     {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("../icons/app.ico");
-        res.set("ProductName", "Hippo Voice");
+        res.set("ProductName", "Hippo Dictate");
         res.set(
             "FileDescription",
-            "Hippo Voice \u{2014} settings and history",
+            "Hippo Dictate \u{2014} settings and history",
         );
         res.set("CompanyName", "Sean Wu");
         res.set("LegalCopyright", "Copyright (C) 2026 Sean Wu");
-        res.set("OriginalFilename", "hippo-voice-settings.exe");
+        res.set("OriginalFilename", "hippo-dictate-settings.exe");
         if let Err(error) = res.compile() {
             println!("cargo:warning=winresource failed to embed the exe icon: {error}");
         }

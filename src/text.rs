@@ -426,9 +426,9 @@ mod tests {
         let mut config = config();
         config.replacements = vec![crate::config::Replacement {
             from: "hippo".to_string(),
-            to: "Hippo Voice".to_string(),
+            to: "Hippo Dictate".to_string(),
         }];
-        assert_eq!(text("open hippo now", &config), "open Hippo Voice now");
+        assert_eq!(text("open hippo now", &config), "open Hippo Dictate now");
         // Not a substring match.
         assert_eq!(text("hippopotamus", &config), "hippopotamus");
     }

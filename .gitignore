@@ -1,4 +1,4 @@
 target/
 vendor/
-hippo-voice-error.log
+hippo-dictate-error.log
 dist/

@@ -36,30 +36,30 @@ if [ "$(id -u)" = "0" ]; then
 fi
 
 # Stop the daemon before removing the binary it is running from.
-if [ -x "$prefix/bin/hippo-voice" ]; then
-    "$prefix/bin/hippo-voice" quit >/dev/null 2>&1 || true
+if [ -x "$prefix/bin/hippo-dictate" ]; then
+    "$prefix/bin/hippo-dictate" quit >/dev/null 2>&1 || true
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
-    systemctl --user disable --now hippo-voice >/dev/null 2>&1 || true
+    systemctl --user disable --now hippo-dictate >/dev/null 2>&1 || true
 fi
-rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/hippo-voice.service"
+rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/hippo-dictate.service"
 systemctl --user daemon-reload >/dev/null 2>&1 || true
 
-rm -rf "$prefix/libexec/hippo-voice"
-for binary in hippo-voice hippo-voice-daemon hippo-voice-settings; do
+rm -rf "$prefix/libexec/hippo-dictate"
+for binary in hippo-dictate hippo-dictate-daemon hippo-dictate-settings; do
     rm -f "$prefix/bin/$binary"
 done
-rm -f "$prefix/share/applications/hippo-voice.desktop"
+rm -f "$prefix/share/applications/hippo-dictate.desktop"
 # Only the sizes this app shipped, not the whole icon theme.
 for size in 16x16 22x22 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
-    rm -f "$prefix/share/icons/hicolor/$size/apps/hippo-voice.png"
+    rm -f "$prefix/share/icons/hicolor/$size/apps/hippo-dictate.png"
 done
 echo "removed the binaries, the launcher and the icons"
 
-data="${XDG_DATA_HOME:-$HOME/.local/share}/hippo-voice"
-state="${XDG_STATE_HOME:-$HOME/.local/state}/hippo-voice"
-config="${XDG_CONFIG_HOME:-$HOME/.config}/hippo-voice"
+data="${XDG_DATA_HOME:-$HOME/.local/share}/hippo-dictate"
+state="${XDG_STATE_HOME:-$HOME/.local/state}/hippo-dictate"
+config="${XDG_CONFIG_HOME:-$HOME/.config}/hippo-dictate"
 
 if [ "$purge" = "1" ]; then
     rm -rf "$data" "$state" "$config"

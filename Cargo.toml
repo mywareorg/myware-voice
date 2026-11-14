@@ -3,27 +3,27 @@ members = ["settings"]
 resolver = "2"
 
 [package]
-name = "hippo-voice"
-version = "0.1.0"
+name = "hippo-dictate"
+version = "0.2.0"
 edition = "2021"
 # `cargo run` is the CLI; the Windows tray daemon is launched with
-# scripts\run-windows.ps1 (or `cargo run --bin hippo-voice-daemon`).
-default-run = "hippo-voice"
+# scripts\run-windows.ps1 (or `cargo run --bin hippo-dictate-daemon`).
+default-run = "hippo-dictate"
 description = "Push-to-talk dictation: speak, and the transcript lands in the focused window."
 license = "LGPL-2.1-only"
-repository = "https://gitlab.com/librewarelive/hippo-voice"
+repository = "https://gitlab.com/librewarelive/hippo-dictate"
 
 [lib]
-name = "hippo_voice"
+name = "hippo_dictate"
 path = "src/lib.rs"
 
 [[bin]]
-name = "hippo-voice"
+name = "hippo-dictate"
 path = "src/main.rs"
 
 # Console-free on Windows, for start-on-login.
 [[bin]]
-name = "hippo-voice-daemon"
+name = "hippo-dictate-daemon"
 path = "src/bin/daemon.rs"
 
 [dependencies]

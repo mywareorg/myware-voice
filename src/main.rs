@@ -4,21 +4,21 @@ use std::time::Instant;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
-use hippo_voice::audio;
-use hippo_voice::capture;
-use hippo_voice::config::Config;
-use hippo_voice::daemon;
-use hippo_voice::history;
-use hippo_voice::inject;
-use hippo_voice::licence::{self, Tier};
-use hippo_voice::log;
-use hippo_voice::model;
-use hippo_voice::sherpa::Sherpa;
-use hippo_voice::text::{self, Outcome};
+use hippo_dictate::audio;
+use hippo_dictate::capture;
+use hippo_dictate::config::Config;
+use hippo_dictate::daemon;
+use hippo_dictate::history;
+use hippo_dictate::inject;
+use hippo_dictate::licence::{self, Tier};
+use hippo_dictate::log;
+use hippo_dictate::model;
+use hippo_dictate::sherpa::Sherpa;
+use hippo_dictate::text::{self, Outcome};
 
 #[derive(Parser)]
 #[command(
-    name = "hippo-voice",
+    name = "hippo-dictate",
     version,
     about = "Push-to-talk dictation. Speak; the transcript lands where you were typing."
 )]
@@ -195,7 +195,7 @@ fn main() -> Result<()> {
                 println!("stopped");
                 Ok(())
             }
-            Err(error) if hippo_voice::transport::is_unreachable(&error) => {
+            Err(error) if hippo_dictate::transport::is_unreachable(&error) => {
                 println!("not running");
                 Ok(())
             }
@@ -220,7 +220,7 @@ fn main() -> Result<()> {
         Command::Status => {
             let reply = match daemon::request("status") {
                 Ok(reply) => reply,
-                Err(error) if hippo_voice::transport::is_unreachable(&error) => {
+                Err(error) if hippo_dictate::transport::is_unreachable(&error) => {
                     println!("not running");
                     return Ok(());
                 }
@@ -312,7 +312,7 @@ fn licence_command(command: LicenceCommand) -> Result<()> {
             println!("public  {public}");
             println!("private {private}");
             eprintln!(
-                "build with HIPPO_VOICE_LICENCE_PUBKEY=<public>; keep <private> off the machines that run the app"
+                "build with HIPPO_DICTATE_LICENCE_PUBKEY=<public>; keep <private> off the machines that run the app"
             );
             Ok(())
         }
@@ -374,7 +374,7 @@ fn model_dir() -> Result<PathBuf> {
 }
 
 fn doctor() -> Result<()> {
-    println!("hippo-voice {}", env!("CARGO_PKG_VERSION"));
+    println!("hippo-dictate {}", env!("CARGO_PKG_VERSION"));
 
     match Sherpa::open() {
         Ok(sherpa) => {
@@ -401,7 +401,7 @@ fn doctor() -> Result<()> {
             } else {
                 println!("model         INCOMPLETE at {}", dir.display());
                 println!("  missing     {}", missing.join(", "));
-                println!("  fix         hippo-voice model download");
+                println!("  fix         hippo-dictate model download");
             }
         }
         Err(error) => {
@@ -423,7 +423,7 @@ fn doctor() -> Result<()> {
                 } else {
                     println!("streaming     INCOMPLETE at {}", dir.display());
                     println!(
-                        "  fix         hippo-voice model download --streaming (falls back to phrase chunks)"
+                        "  fix         hippo-dictate model download --streaming (falls back to phrase chunks)"
                     );
                 }
             }
@@ -522,9 +522,9 @@ fn model_command(command: ModelCommand) -> Result<()> {
         model::resolve_dir()?
     };
     let rerun = if streaming {
-        "hippo-voice model download --streaming"
+        "hippo-dictate model download --streaming"
     } else {
-        "hippo-voice model download"
+        "hippo-dictate model download"
     };
     match command {
         ModelCommand::Status { .. } => {
@@ -607,7 +607,7 @@ fn session_name() -> &'static str {
 
 fn transcribe(path: &Path, json: bool, threads: i32, repeat: usize) -> Result<()> {
     let dir = model_dir()
-        .context("no model directory; set HIPPO_VOICE_MODEL_DIR or run scripts/fetch-model.sh")?;
+        .context("no model directory; set HIPPO_DICTATE_MODEL_DIR or run scripts/fetch-model.sh")?;
 
     let started = Instant::now();
     let (samples, gain) = audio::prepare(path)?;

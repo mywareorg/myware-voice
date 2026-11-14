@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# Remove hippo-voice for the current user.
+# Remove hippo-dictate for the current user.
 #
 # Stops the daemon, removes the start-up entry, the user PATH entry, the program
 # folder, and - after asking - the downloaded model and the local state.
@@ -15,13 +15,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$target = Join-Path $env:LOCALAPPDATA 'Programs\hippo-voice'
-$state = Join-Path $env:LOCALAPPDATA 'hippo-voice'
-$config = Join-Path $env:APPDATA 'hippo-voice'
-$client = Join-Path $target 'hippo-voice.exe'
+$target = Join-Path $env:LOCALAPPDATA 'Programs\hippo-dictate'
+$state = Join-Path $env:LOCALAPPDATA 'hippo-dictate'
+$config = Join-Path $env:APPDATA 'hippo-dictate'
+$client = Join-Path $target 'hippo-dictate.exe'
 
 if (-not $Force) {
-    $answer = Read-Host "Remove hippo-voice from $target? [y/N]"
+    $answer = Read-Host "Remove hippo-dictate from $target? [y/N]"
     if ($answer -notmatch '^(y|yes)$') {
         Write-Host 'cancelled'
         exit 0
@@ -77,4 +77,4 @@ if (Test-Path -LiteralPath $config) {
     Write-Host "removed $config"
 }
 
-Write-Host 'hippo-voice is uninstalled'
+Write-Host 'hippo-dictate is uninstalled'

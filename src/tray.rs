@@ -160,7 +160,7 @@ fn run(events: Sender<Event>) -> Result<()> {
         // Embedded by build.rs as resource 1, so the notification area shows the
         // same mark as Explorer and the taskbar.
         data.hIcon = load_icon(instance);
-        let tip: Vec<u16> = "Hippo Voice - click to open settings, ctrl+space to dictate\0"
+        let tip: Vec<u16> = "Hippo Dictate - click to open settings, ctrl+space to dictate\0"
             .encode_utf16()
             .collect();
         for (slot, value) in data.szTip.iter_mut().zip(tip.iter()) {
@@ -212,7 +212,7 @@ unsafe fn build_menu() -> *mut std::ffi::c_void {
         return menu;
     }
 
-    let header = wide("Hippo Voice");
+    let header = wide("Hippo Dictate");
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, header.as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
     let settings = wide("Open settings\u{2026}");
@@ -328,12 +328,12 @@ fn open_settings(pane: &str) {
         return;
     };
     let Some(dir) = exe.parent() else { return };
-    let path = dir.join("hippo-voice-settings.exe");
+    let path = dir.join("hippo-dictate-settings.exe");
     if !path.is_file() {
         crate::log::error(&format!("tray: {} is not installed", path.display()));
         notify(
             "Settings are not available",
-            "hippo-voice-settings.exe is missing beside the daemon.",
+            "hippo-dictate-settings.exe is missing beside the daemon.",
         );
         return;
     }
@@ -341,7 +341,7 @@ fn open_settings(pane: &str) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let mut command = std::process::Command::new(path);
-    command.env("HIPPO_VOICE_START_PANE", pane);
+    command.env("HIPPO_DICTATE_START_PANE", pane);
     command.creation_flags(CREATE_NO_WINDOW);
     crate::log::write(&format!("tray: opening settings for {pane}"));
     if let Err(error) = command.spawn() {

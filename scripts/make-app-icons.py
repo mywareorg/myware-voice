@@ -117,7 +117,7 @@ def main() -> None:
     for size in HICOLOR_SIZES:
         target = hicolor / f"{size}x{size}" / "apps"
         target.mkdir(parents=True, exist_ok=True)
-        frame(mark, size).save(target / "hippo-voice.png")
+        frame(mark, size).save(target / "hippo-dictate.png")
     print(f"{hicolor}  {', '.join(str(size) for size in HICOLOR_SIZES)}")
 
 

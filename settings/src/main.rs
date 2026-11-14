@@ -5,14 +5,14 @@
 //! watches the file and applies what it finds on its next capture, which is why
 //! there is no reload protocol to keep in step.
 
+use hippo_dictate::capture;
+use hippo_dictate::chord::Chord;
+use hippo_dictate::config::{Config, PasteMethod};
+use hippo_dictate::history;
+use hippo_dictate::model;
 use hippo_ui::rows::{settings_divider, settings_row, switch_row};
 use hippo_ui::styles::*;
 use hippo_ui::tokens::{self, AppTheme, Scheme};
-use hippo_voice::capture;
-use hippo_voice::chord::Chord;
-use hippo_voice::config::{Config, PasteMethod};
-use hippo_voice::history;
-use hippo_voice::model;
 use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{Element, Length, Task};
 use std::sync::OnceLock;
@@ -34,7 +34,7 @@ fn main() -> iced::Result {
     // otherwise disappear with the console.
     let result = run();
     if let Err(error) = &result {
-        hippo_voice::log::error(&format!("settings: {error}"));
+        hippo_dictate::log::error(&format!("settings: {error}"));
     }
     result
 }
@@ -56,7 +56,7 @@ fn run() -> iced::Result {
         ..iced::window::Settings::default()
     };
 
-    iced::application("Hippo Voice", Settings::update, Settings::view)
+    iced::application("Hippo Dictate", Settings::update, Settings::view)
         .theme(|state: &Settings| state.mode.iced())
         .font(include_bytes!("../assets/bootstrap-icons.ttf").as_slice())
         .window(window)
@@ -118,7 +118,7 @@ impl Settings {
         devices.extend(capture::input_devices().unwrap_or_default());
 
         // Presence only, not hashes: boot must not block the first frame on 640 MB
-        // of SHA-256. `hippo-voice model verify` is the command that hashes.
+        // of SHA-256. `hippo-dictate model verify` is the command that hashes.
         let model_state = match model::resolve_dir() {
             Ok(dir) => match model::inspect(&dir, false) {
                 Ok(rows)
@@ -138,7 +138,7 @@ impl Settings {
         // The tray opens a specific pane; without a window manager there is no
         // way to pass an argument to an iced app, so the choice comes through
         // the environment. A request file covers a window that is already open.
-        let pane = match std::env::var("HIPPO_VOICE_START_PANE").as_deref() {
+        let pane = match std::env::var("HIPPO_DICTATE_START_PANE").as_deref() {
             Ok("history") => Pane::History,
             _ => Pane::Settings,
         };
@@ -249,7 +249,7 @@ impl Settings {
             }
             Message::Copy(index) => {
                 if let Some(entry) = self.entries.get(index) {
-                    match hippo_voice::inject::copy(&entry.text) {
+                    match hippo_dictate::inject::copy(&entry.text) {
                         Ok(()) => self.copied = Some(index),
                         Err(error) => self.error = Some(format!("could not copy: {error}")),
                     }
@@ -305,7 +305,7 @@ impl Settings {
             iced::widget::image(header_logo())
                 .width(Length::Fixed(HEADER_LOGO_SIZE))
                 .height(Length::Fixed(HEADER_LOGO_SIZE)),
-            text("Hippo Voice").size(tokens::TEXT_XL),
+            text("Hippo Dictate").size(tokens::TEXT_XL),
             iced::widget::horizontal_space(),
             pick_list(AppTheme::ALL.as_slice(), Some(self.mode), Message::Theme)
                 .style(pill_pick(scheme)),
@@ -561,7 +561,7 @@ impl Settings {
                 container(
                     row![
                         column![
-                            text(hippo_voice::log::stamp(entry.epoch))
+                            text(hippo_dictate::log::stamp(entry.epoch))
                                 .size(tokens::TEXT_2XS)
                                 .color(scheme.muted),
                             text(entry.text.as_str()).size(tokens::TEXT_SM),
@@ -617,7 +617,7 @@ impl Settings {
 
 /// Read and delete the pane the tray asked for, if any.
 fn take_requested_pane() -> Option<Pane> {
-    let path = hippo_voice::dirs::settings_request_file().ok()?;
+    let path = hippo_dictate::dirs::settings_request_file().ok()?;
     let text = std::fs::read_to_string(&path).ok()?;
     let _ = std::fs::remove_file(&path);
     match text.trim() {
@@ -640,8 +640,8 @@ fn focus_running_window() -> bool {
         FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
     };
 
-    let name: Vec<u16> = "Local\\hippo-voice-settings\0".encode_utf16().collect();
-    let title: Vec<u16> = "Hippo Voice\0".encode_utf16().collect();
+    let name: Vec<u16> = "Local\\hippo-dictate-settings\0".encode_utf16().collect();
+    let title: Vec<u16> = "Hippo Dictate\0".encode_utf16().collect();
 
     unsafe {
         // CreateMutexW does not clear the last error on success, so a stale
@@ -777,8 +777,10 @@ mod tests {
 
     #[test]
     fn saving_keeps_what_this_window_does_not_own() {
-        let path =
-            std::env::temp_dir().join(format!("hippo-voice-settings-{}.toml", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "hippo-dictate-settings-{}.toml",
+            std::process::id()
+        ));
         // A comment above a key the window never writes, and a key from a version
         // that has not been released yet: both have to survive a save.
         std::fs::write(

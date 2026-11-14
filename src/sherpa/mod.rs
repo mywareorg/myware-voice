@@ -109,7 +109,7 @@ fn library_file() -> &'static str {
 
 /// Find the runtime, in the same order `doctor` reports.
 ///
-/// 1. `HIPPO_VOICE_SHERPA_DIR`
+/// 1. `HIPPO_DICTATE_SHERPA_DIR`
 /// 2. `lib/` beside the executable
 /// 3. `vendor/sherpa/lib` relative to the source tree, for development
 pub fn resolve_library() -> Result<PathBuf> {
@@ -126,7 +126,7 @@ pub fn resolve_library() -> Result<PathBuf> {
 /// The search order, with its inputs passed in so every layout can be tested on
 /// any host:
 ///
-/// 1. `HIPPO_VOICE_SHERPA_DIR`, an explicit override for a hand-placed runtime
+/// 1. `HIPPO_DICTATE_SHERPA_DIR`, an explicit override for a hand-placed runtime
 /// 2. beside the executable, which is where the release folder puts it
 /// 3. the executable's `lib/`
 /// 4. `vendor/sherpa/lib` in the source tree, for development
@@ -141,7 +141,7 @@ pub fn resolve_library_in(
     let name = library_file();
     let mut candidates = Vec::new();
 
-    if let Some(dir) = env("HIPPO_VOICE_SHERPA_DIR") {
+    if let Some(dir) = env("HIPPO_DICTATE_SHERPA_DIR") {
         let dir = PathBuf::from(dir);
         candidates.push(dir.join("lib").join(name));
         candidates.push(dir.join(name));
@@ -159,7 +159,7 @@ pub fn resolve_library_in(
         .ok_or_else(|| {
             anyhow!(
                 "sherpa-onnx runtime not found; run scripts/fetch-sherpa.sh \
-                 or set HIPPO_VOICE_SHERPA_DIR"
+                 or set HIPPO_DICTATE_SHERPA_DIR"
             )
         })
 }
@@ -644,8 +644,10 @@ mod resolution {
 
     impl Tree {
         fn new(name: &str) -> Self {
-            let root = std::env::temp_dir()
-                .join(format!("hippo-voice-sherpa-{name}-{}", std::process::id()));
+            let root = std::env::temp_dir().join(format!(
+                "hippo-dictate-sherpa-{name}-{}",
+                std::process::id()
+            ));
             let _ = fs::remove_dir_all(&root);
             fs::create_dir_all(&root).unwrap();
             Self(root)
@@ -712,7 +714,7 @@ mod resolution {
         let expected = tree.touch(&format!("elsewhere/lib/{}", library_file()));
 
         let env = |key: &str| {
-            (key == "HIPPO_VOICE_SHERPA_DIR").then(|| OsString::from(tree.0.join("elsewhere")))
+            (key == "HIPPO_DICTATE_SHERPA_DIR").then(|| OsString::from(tree.0.join("elsewhere")))
         };
         let found = resolve_library_in(&env, Some(&tree.0.join("app")), &tree.0.join("src"))
             .expect("resolve");
@@ -726,16 +728,16 @@ mod resolution {
             .expect_err("should not resolve");
         let text = error.to_string();
         assert!(text.contains("fetch-sherpa"), "{text}");
-        assert!(text.contains("HIPPO_VOICE_SHERPA_DIR"), "{text}");
+        assert!(text.contains("HIPPO_DICTATE_SHERPA_DIR"), "{text}");
     }
 
     /// Diagnostic for long dictation: confirms the online stream keeps
     /// producing a prefix-stable hypothesis and endpoints on its own.
     #[test]
-    #[ignore = "needs HIPPO_VOICE_STREAMING_MODEL_DIR and HIPPO_VOICE_SMOKE_WAV"]
+    #[ignore = "needs HIPPO_DICTATE_STREAMING_MODEL_DIR and HIPPO_DICTATE_SMOKE_WAV"]
     fn the_online_recognizer_survives_a_long_stream() {
-        let dir = std::env::var("HIPPO_VOICE_STREAMING_MODEL_DIR").expect("model dir");
-        let wav = std::env::var("HIPPO_VOICE_SMOKE_WAV").expect("wav path");
+        let dir = std::env::var("HIPPO_DICTATE_STREAMING_MODEL_DIR").expect("model dir");
+        let wav = std::env::var("HIPPO_DICTATE_SMOKE_WAV").expect("wav path");
         let sherpa = Sherpa::open().expect("sherpa");
         let recognizer = Arc::new(
             sherpa
@@ -808,10 +810,10 @@ mod resolution {
     /// a WAV, so it is the one test that exercises the online C API and its
     /// struct layouts. Run with both variables set and `--ignored`.
     #[test]
-    #[ignore = "needs HIPPO_VOICE_STREAMING_MODEL_DIR and HIPPO_VOICE_SMOKE_WAV"]
+    #[ignore = "needs HIPPO_DICTATE_STREAMING_MODEL_DIR and HIPPO_DICTATE_SMOKE_WAV"]
     fn the_online_recognizer_accepts_audio() {
-        let dir = std::env::var("HIPPO_VOICE_STREAMING_MODEL_DIR").expect("model dir");
-        let wav = std::env::var("HIPPO_VOICE_SMOKE_WAV").expect("wav path");
+        let dir = std::env::var("HIPPO_DICTATE_STREAMING_MODEL_DIR").expect("model dir");
+        let wav = std::env::var("HIPPO_DICTATE_SMOKE_WAV").expect("wav path");
         let sherpa = Sherpa::open().expect("sherpa");
         let recognizer = Arc::new(
             sherpa

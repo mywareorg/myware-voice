@@ -52,12 +52,12 @@ pub fn install_root() -> Result<PathBuf> {
 /// Installed packages win over the source tree, so a developer who has both does
 /// not silently run a stale vendored copy.
 pub fn resolve_dir() -> Result<PathBuf> {
-    resolve_locked(&lock()?, "HIPPO_VOICE_MODEL_DIR")
+    resolve_locked(&lock()?, "HIPPO_DICTATE_MODEL_DIR")
 }
 
 /// The directory the streaming model should load from.
 pub fn streaming_dir() -> Result<PathBuf> {
-    resolve_locked(&streaming_lock()?, "HIPPO_VOICE_STREAMING_MODEL_DIR")
+    resolve_locked(&streaming_lock()?, "HIPPO_DICTATE_STREAMING_MODEL_DIR")
 }
 
 fn resolve_locked(lock: &Lock, variable: &str) -> Result<PathBuf> {
@@ -157,7 +157,7 @@ pub fn unusable_reason(dir: &Path) -> Option<String> {
         None
     } else {
         Some(format!(
-            "no usable model in {} (missing {}); run `hippo-voice model download`",
+            "no usable model in {} (missing {}); run `hippo-dictate model download`",
             dir.display(),
             missing.join(", ")
         ))
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn a_missing_file_is_reported_missing_rather_than_corrupt() {
-        let dir = std::env::temp_dir().join("hippo-voice-model-test");
+        let dir = std::env::temp_dir().join("hippo-dictate-model-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let rows = inspect(&dir, false).unwrap();

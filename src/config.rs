@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn a_stamp_notices_a_rewrite_and_a_deletion() {
-        let path = std::env::temp_dir().join(format!("hippo-voice-stamp-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("hippo-dictate-stamp-{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
         assert_eq!(Stamp::of(&path), None, "a missing file has no stamp");
 

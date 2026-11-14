@@ -164,7 +164,7 @@ if (Test-Path -LiteralPath $dll) {
 
 # The extractor lives outside the checkout so it survives a clean of vendor\.
 $cacheRoot = if ($env:LOCALAPPDATA) {
-    Join-Path $env:LOCALAPPDATA 'hippo-voice\cache'
+    Join-Path $env:LOCALAPPDATA 'hippo-dictate\cache'
 } else {
     Join-Path $Dest 'cache'
 }
@@ -208,4 +208,4 @@ foreach ($name in @('sherpa-onnx-c-api.dll', 'onnxruntime.dll')) {
 }
 
 Write-Host "sherpa-onnx $version ready: $libDir"
-Write-Host "copy $libDir\*.dll beside hippo-voice.exe, or set HIPPO_VOICE_SHERPA_DIR"
+Write-Host "copy $libDir\*.dll beside hippo-dictate.exe, or set HIPPO_DICTATE_SHERPA_DIR"

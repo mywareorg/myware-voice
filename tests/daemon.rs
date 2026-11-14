@@ -12,8 +12,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use hippo_voice::audio;
-use hippo_voice::daemon;
+use hippo_dictate::audio;
+use hippo_dictate::daemon;
 
 /// The client resolves the endpoint from the process environment, which is
 /// global. One test at a time keeps the two round trips from fighting over it.
@@ -24,7 +24,7 @@ struct Temp(PathBuf);
 impl Temp {
     fn new(name: &str) -> Self {
         let root =
-            std::env::temp_dir().join(format!("hippo-voice-test-{name}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("hippo-dictate-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("create the test directory");
         Self(root)
@@ -84,9 +84,9 @@ impl Fixture {
         // The client in this process resolves the endpoint from these.
         std::env::set_var("XDG_RUNTIME_DIR", &runtime);
         std::env::set_var("XDG_STATE_HOME", &state_home);
-        std::env::set_var("HIPPO_VOICE_CONFIG", &config_path);
+        std::env::set_var("HIPPO_DICTATE_CONFIG", &config_path);
 
-        let mut command = Command::new(env!("CARGO_BIN_EXE_hippo-voice"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_hippo-dictate"));
         command
             .arg("daemon")
             .env("XDG_RUNTIME_DIR", &runtime)
@@ -94,13 +94,13 @@ impl Fixture {
             // The config file is named outright rather than derived from
             // `XDG_CONFIG_HOME`: this test edits it, and nothing else in the
             // suite should have to care where it lives.
-            .env("HIPPO_VOICE_CONFIG", &config_path)
-            .env("HIPPO_VOICE_FAKE_AUDIO", &wav)
-            .env("HIPPO_VOICE_FAKE_DELIVERY", "1")
+            .env("HIPPO_DICTATE_CONFIG", &config_path)
+            .env("HIPPO_DICTATE_FAKE_AUDIO", &wav)
+            .env("HIPPO_DICTATE_FAKE_DELIVERY", "1")
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         if let Some(canned) = model {
-            command.env("HIPPO_VOICE_FAKE_MODEL", canned);
+            command.env("HIPPO_DICTATE_FAKE_MODEL", canned);
         }
         for (key, value) in extra {
             command.env(key, value);
@@ -117,9 +117,9 @@ impl Fixture {
         Self {
             _temp: temp,
             config_path,
-            // `XDG_STATE_HOME/hippo-voice/log`, the same resolution the daemon
+            // `XDG_STATE_HOME/hippo-dictate/log`, the same resolution the daemon
             // uses, so a test can read what it wrote.
-            log_path: state_home.join("hippo-voice").join("log"),
+            log_path: state_home.join("hippo-dictate").join("log"),
             _daemon: daemon,
         }
     }
@@ -216,7 +216,7 @@ fn toggle_records_decodes_and_reports_a_transcript() {
 #[test]
 fn a_device_that_dies_mid_capture_still_delivers() {
     let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
-    let text = round_trip("salvage", &[("HIPPO_VOICE_FAKE_AUDIO_FAILS", "1")]);
+    let text = round_trip("salvage", &[("HIPPO_DICTATE_FAKE_AUDIO_FAILS", "1")]);
     assert_eq!(
         text.as_deref(),
         Some("hello from the test"),
@@ -306,7 +306,7 @@ fn a_panicking_decode_is_reported_and_the_next_press_still_records() {
         "panic",
         "paste = \"none\"\ntones = false\nhistory = false\n",
         Some("hello from the test"),
-        &[("HIPPO_VOICE_FAKE_DECODE", "panic")],
+        &[("HIPPO_DICTATE_FAKE_DECODE", "panic")],
     );
 
     daemon::request("toggle").expect("toggle on");
@@ -363,7 +363,10 @@ fn a_missing_model_is_reported_at_startup() {
         "no-model",
         "paste = \"none\"\ntones = false\n",
         None,
-        &[("HIPPO_VOICE_MODEL_DIR", model_dir.to_str().expect("utf-8"))],
+        &[(
+            "HIPPO_DICTATE_MODEL_DIR",
+            model_dir.to_str().expect("utf-8"),
+        )],
     );
 
     let reported = daemon::request("status")
@@ -444,7 +447,7 @@ fn a_licence_is_reported_and_never_blocks_dictation() {
         "licence",
         "paste = \"none\"\ntones = false\nhistory = false\n",
         Some("hello from the test"),
-        &[("HIPPO_VOICE_LICENCE", licence.to_str().expect("utf-8"))],
+        &[("HIPPO_DICTATE_LICENCE", licence.to_str().expect("utf-8"))],
     );
 
     let status = daemon::request("status").expect("status");
@@ -515,7 +518,7 @@ fn a_client_from_another_build_is_refused_and_told_why() {
 
     // Raw, because `daemon::request` always sends this build's version: the point
     // is a client from a build that speaks something else.
-    let mut stream = hippo_voice::transport::connect().expect("connect");
+    let mut stream = hippo_dictate::transport::connect().expect("connect");
     let request = serde_json::json!({ "cmd": "status", "protocol": 99 });
     serde_json::to_writer(&mut stream, &request).expect("write request");
     stream.write_all(b"\n").expect("newline");
@@ -523,7 +526,7 @@ fn a_client_from_another_build_is_refused_and_told_why() {
     BufReader::new(stream)
         .read_line(&mut line)
         .expect("read the reply");
-    let reply: hippo_voice::daemon::Reply = serde_json::from_str(&line).expect("parse the reply");
+    let reply: hippo_dictate::daemon::Reply = serde_json::from_str(&line).expect("parse the reply");
 
     assert!(!reply.ok, "a mismatched protocol was served");
     assert_eq!(
@@ -620,7 +623,7 @@ fn a_spoken_quit_stops_the_daemon() {
         wait_until(
             || daemon::request("status")
                 .err()
-                .is_some_and(|error| hippo_voice::transport::is_unreachable(&error)),
+                .is_some_and(|error| hippo_dictate::transport::is_unreachable(&error)),
             Duration::from_secs(15)
         ),
         "the daemon did not stop on a spoken quit"
@@ -636,7 +639,7 @@ fn a_terminal_never_receives_a_newline() {
         // The decoder can return a line break: a snippet with one, or a spoken
         // "new paragraph". Pasted into a shell, that is a command boundary.
         Some("hello\nworld"),
-        &[("HIPPO_VOICE_FAKE_FOCUS", "foot:1")],
+        &[("HIPPO_DICTATE_FAKE_FOCUS", "foot:1")],
     );
 
     let text = deliver_once();

@@ -7,12 +7,12 @@
 # The sherpa-onnx runtime is fetched as a second source with the checksum from
 # `sherpa.lock`, rather than by running `scripts/fetch-sherpa.sh` in `prepare`:
 # makepkg should see every download and every hash in one place.
-pkgname=hippo-voice
-pkgver=0.1.0
+pkgname=hippo-dictate
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Push-to-talk dictation for sway/Wayland, with a local speech model'
 arch=('x86_64')
-url='https://gitlab.com/librewarelive/hippo-voice'
+url='https://gitlab.com/librewarelive/hippo-dictate'
 license=('LGPL-2.1-only')
 # The settings window is iced, which wants a Wayland client and xkbcommon at link
 # time; cpal wants ALSA. `wl-clipboard` is not optional: without wl-copy the
@@ -44,31 +44,31 @@ package() {
     local libdir="$pkgdir/usr/lib/$pkgname"
 
     install -d "$libdir/lib" "$pkgdir/usr/bin" "$pkgdir/usr/share/applications"
-    install -m 755 target/release/hippo-voice \
-        target/release/hippo-voice-daemon \
-        target/release/hippo-voice-settings "$libdir/"
+    install -m 755 target/release/hippo-dictate \
+        target/release/hippo-dictate-daemon \
+        target/release/hippo-dictate-settings "$libdir/"
     # sherpa-onnx and onnxruntime together: the SONAME is resolved through the
     # shared object's own $ORIGIN rpath.
     install -m 644 "$srcdir/sherpa-onnx-v1.13.8-linux-x64-shared/lib/"*.so "$libdir/lib/"
 
-    for binary in hippo-voice hippo-voice-daemon hippo-voice-settings; do
+    for binary in hippo-dictate hippo-dictate-daemon hippo-dictate-settings; do
         ln -s "/usr/lib/$pkgname/$binary" "$pkgdir/usr/bin/$binary"
     done
 
-    install -m 644 packaging/hippo-voice.desktop \
-        "$pkgdir/usr/share/applications/hippo-voice.desktop"
+    install -m 644 packaging/hippo-dictate.desktop \
+        "$pkgdir/usr/share/applications/hippo-dictate.desktop"
 
     local size
     for size in 16x16 22x22 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
-        install -Dm644 "packaging/hicolor/$size/apps/hippo-voice.png" \
-            "$pkgdir/usr/share/icons/hicolor/$size/apps/hippo-voice.png"
+        install -Dm644 "packaging/hicolor/$size/apps/hippo-dictate.png" \
+            "$pkgdir/usr/share/icons/hicolor/$size/apps/hippo-dictate.png"
     done
 
     # The packaged unit runs the packaged binary, not the per-user install.
-    install -Dm 644 packaging/systemd/hippo-voice.service \
-        "$pkgdir/usr/lib/systemd/user/hippo-voice.service"
-    sed -i 's|%h/\.local/libexec/hippo-voice/hippo-voice|/usr/bin/hippo-voice|' \
-        "$pkgdir/usr/lib/systemd/user/hippo-voice.service"
+    install -Dm 644 packaging/systemd/hippo-dictate.service \
+        "$pkgdir/usr/lib/systemd/user/hippo-dictate.service"
+    sed -i 's|%h/\.local/libexec/hippo-dictate/hippo-dictate|/usr/bin/hippo-dictate|' \
+        "$pkgdir/usr/lib/systemd/user/hippo-dictate.service"
 
     install -Dm 644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
