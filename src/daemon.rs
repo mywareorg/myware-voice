@@ -429,6 +429,8 @@ struct Daemon {
     tier: Tier,
     /// When the stop press arrived, for the delivery spans.
     stopped_at: Option<Instant>,
+    /// Set by a spoken "quit hippo" or the equivalent.
+    quit_requested: bool,
     jobs: Sender<DecodeJob>,
     status: Arc<Mutex<Status>>,
     recorder: Option<Recorder>,
@@ -486,6 +488,21 @@ impl Daemon {
                 self.fail(&error);
                 Ok(())
             }
+        }
+    }
+
+    /// Run a whole-utterance command. The transcript is discarded either way.
+    fn perform(&mut self, command: crate::text::Command) {
+        note(&format!("command: {}", command.arg()));
+        match command {
+            crate::text::Command::Discard => {
+                if !self.fake_delivery {
+                    inject::notify("Discarded", "Nothing was pasted");
+                }
+            }
+            // The event loop checks this after every event, so the socket, the
+            // tray and a spoken command all stop the daemon the same way.
+            crate::text::Command::Quit => self.quit_requested = true,
         }
     }
 
@@ -1032,13 +1049,22 @@ impl Daemon {
             format!("{text} ")
         };
 
-        self.stream_text.push_str(text);
+        // Only the mid-sentence-safe part: a snippet or a command must see the
+        // whole utterance, not one phrase of it.
+        let text = crate::text::cleanup_only(text, &self.config)
+            .trim()
+            .to_string();
+        if text.is_empty() {
+            return Ok(());
+        }
+
+        self.stream_text.push_str(&text);
         self.stream_text.push(' ');
 
         // Recorded before the delivery branch, so a fake-delivery test sees the
         // same status a real one would report.
         if let Ok(mut status) = self.status.lock() {
-            status.last_text = Some(text.to_string());
+            status.last_text = Some(text.clone());
         }
 
         if self.fake_delivery {
@@ -1094,6 +1120,25 @@ impl Daemon {
         self.last_activity = Instant::now();
         let text = text.trim().to_string();
         if text.is_empty() {
+            self.set(Phase::Idle);
+            return Ok(());
+        }
+
+        // The cleanup and replacement pass, then a command if the whole utterance
+        // was one. A command is not a transcript: nothing is copied or pasted.
+        let text = match crate::text::apply(&text, &self.config) {
+            crate::text::Outcome::Text(text) => text,
+            crate::text::Outcome::Command(command) => {
+                self.perform(command);
+                self.set(Phase::Idle);
+                return Ok(());
+            }
+        };
+        if text.trim().is_empty() {
+            inject::notify(
+                "Nothing to paste",
+                "The cleanup pass emptied the transcript",
+            );
             self.set(Phase::Idle);
             return Ok(());
         }
@@ -1586,6 +1631,7 @@ pub fn run(model_dir: PathBuf) -> Result<()> {
         config_error,
         tier: entitlement.tier,
         stopped_at: None,
+        quit_requested: false,
         jobs: jobs_tx,
         status,
         recorder: None,
@@ -1613,6 +1659,9 @@ pub fn run(model_dir: PathBuf) -> Result<()> {
             // phase itself, so the loop only has to keep going.
             Ok(event) => {
                 let _ = daemon.handle(event);
+                if daemon.quit_requested {
+                    break;
+                }
             }
             Err(RecvTimeoutError::Timeout) => {
                 daemon.reload_config();

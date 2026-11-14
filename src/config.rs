@@ -58,6 +58,20 @@ impl PasteMethod {
     }
 }
 
+/// A phrase that expands to fixed text when it is the whole utterance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snippet {
+    pub trigger: String,
+    pub text: String,
+}
+
+/// A whole-word substitution: a name, an acronym, a correction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Replacement {
+    pub from: String,
+    pub to: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -110,6 +124,19 @@ pub struct Config {
     pub history: bool,
     /// Delete history entries older than this many days.
     pub history_days: u32,
+    /// Strip fillers and repeated words, and tidy the spacing, before delivery.
+    pub cleanup: bool,
+    /// Turn spoken "at sign" and "dot com" into addresses.
+    pub formatting: bool,
+    /// Treat spoken punctuation names as punctuation. Off by default: people say
+    /// "comma" and "period" in prose often enough that this has to be asked for.
+    pub punctuation_commands: bool,
+    /// Whole-utterance commands: "scratch that", "quit hippo".
+    pub commands: bool,
+    /// Phrases that expand to fixed text.
+    pub snippets: Vec<Snippet>,
+    /// Whole-word substitutions, applied last.
+    pub replacements: Vec<Replacement>,
 }
 
 impl Default for Config {
@@ -130,6 +157,12 @@ impl Default for Config {
             stream_online: false,
             history: false,
             history_days: 30,
+            cleanup: true,
+            formatting: true,
+            punctuation_commands: false,
+            commands: true,
+            snippets: Vec::new(),
+            replacements: Vec::new(),
         }
     }
 }

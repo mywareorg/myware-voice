@@ -19,6 +19,7 @@ pub mod model;
 #[cfg(windows)]
 pub mod overlay;
 pub mod sherpa;
+pub mod text;
 pub mod tone;
 pub mod transport;
 #[cfg(windows)]

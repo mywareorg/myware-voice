@@ -14,6 +14,7 @@ use hippo_voice::licence::{self, Tier};
 use hippo_voice::log;
 use hippo_voice::model;
 use hippo_voice::sherpa::Sherpa;
+use hippo_voice::text::{self, Outcome};
 
 #[derive(Parser)]
 #[command(
@@ -104,6 +105,11 @@ enum Command {
         #[arg(long, default_value_t = 40)]
         lines: usize,
     },
+    /// Run the cleanup and formatting rules on a phrase, and print the result.
+    Text {
+        /// The words, as one utterance. Quote them.
+        words: Vec<String>,
+    },
     /// Show the opt-in transcript history.
     History {
         #[arg(long, default_value_t = 20)]
@@ -152,6 +158,14 @@ fn main() -> Result<()> {
         Command::Daemon => daemon::run_process(),
         Command::Model { command } => model_command(command),
         Command::Licence { command } => licence_command(command),
+        Command::Text { words } => {
+            let config = Config::load()?;
+            match text::apply(&words.join(" "), &config) {
+                Outcome::Text(text) => println!("{text}"),
+                Outcome::Command(command) => println!("command: {}", command.arg()),
+            }
+            Ok(())
+        }
         Command::Log { lines } => {
             println!("{}", log::path()?.display());
             for line in log::tail(lines)? {
@@ -604,12 +618,11 @@ fn transcribe(path: &Path, json: bool, threads: i32, repeat: usize) -> Result<()
     let recognizer = sherpa.recognizer(&dir, threads)?;
     let loaded = load_at.elapsed();
 
+    // The same rules the daemon applies, so a file and a dictation read alike.
+    let config = Config::load().unwrap_or_default();
     // Long clips are cut at silences: Parakeet degrades badly on one long
     // single pass and grows memory doing it.
-    let chunk_seconds = Config::load()
-        .map(|config| config.chunk_seconds)
-        .unwrap_or(20.0);
-    let spans = audio::split_at_silence(&samples, chunk_seconds);
+    let spans = audio::split_at_silence(&samples, config.chunk_seconds);
 
     // The same audio, decoded again and again: allocator state, thermal drift and
     // warm caches make a single sample misleading, and these are the numbers a
@@ -627,6 +640,11 @@ fn transcribe(path: &Path, json: bool, threads: i32, repeat: usize) -> Result<()
         }
         text = parts.join(" ");
         runs.push(decode_at.elapsed().as_secs_f64());
+    }
+
+    // A command in a file is just words: nobody dictated "scratch that" at a file.
+    if let Outcome::Text(processed) = text::apply(&text, &config) {
+        text = processed;
     }
 
     let mut sorted = runs.clone();

@@ -544,3 +544,85 @@ fn a_client_from_another_build_is_refused_and_told_why() {
         Some("idle")
     );
 }
+
+#[test]
+fn a_filler_laden_transcript_arrives_clean() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let _fixture = Fixture::start(
+        "cleanup",
+        "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("um, mail sean at sign example dot com"),
+        &[],
+    );
+
+    let text = deliver_once();
+    assert_eq!(
+        text.as_deref(),
+        Some("mail sean@example.com"),
+        "the cleanup pass did not run on the delivered text"
+    );
+}
+
+#[test]
+fn a_spoken_command_discards_the_transcript() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let _fixture = Fixture::start(
+        "command",
+        "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("scratch that"),
+        &[],
+    );
+
+    daemon::request("toggle").expect("toggle on");
+    assert!(
+        wait_until(
+            || daemon::request("status")
+                .ok()
+                .is_some_and(|status| status.phase.as_deref() == Some("recording")),
+            Duration::from_secs(5)
+        ),
+        "the daemon never started recording"
+    );
+    std::thread::sleep(Duration::from_millis(150));
+    daemon::request("toggle").expect("toggle off");
+
+    assert!(
+        wait_until(
+            || daemon::request("status")
+                .ok()
+                .is_some_and(|status| status.phase.as_deref() == Some("idle")),
+            Duration::from_secs(15)
+        ),
+        "the daemon never finished the command"
+    );
+    assert_eq!(
+        daemon::request("status").expect("status").text,
+        None,
+        "a discarded utterance was delivered anyway"
+    );
+}
+
+#[test]
+fn a_spoken_quit_stops_the_daemon() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let _fixture = Fixture::start(
+        "quit-command",
+        "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("quit hippo"),
+        &[],
+    );
+
+    daemon::request("toggle").expect("toggle on");
+    std::thread::sleep(Duration::from_millis(200));
+    daemon::request("toggle").expect("toggle off");
+
+    assert!(
+        wait_until(
+            || daemon::request("status")
+                .err()
+                .is_some_and(|error| hippo_voice::transport::is_unreachable(&error)),
+            Duration::from_secs(15)
+        ),
+        "the daemon did not stop on a spoken quit"
+    );
+}

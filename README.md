@@ -39,6 +39,9 @@ cargo build
 focused window can be read, the licence tier, and which of `wl-copy`, `wtype`,
 `ydotool` and `notify-send` it found.
 
+`transcribe` applies the same text rules before printing, so a file and a
+dictation read alike.
+
 `transcribe --json` reports `t_prepare`, `t_load`, `t_decode`, RTF and peak RSS,
 which is how the warm-model decision is measured rather than guessed. `--repeat N`
 adds the spread: every run, and a summary of min, median, p90 and max.
@@ -139,6 +142,49 @@ timings: decode 380 ms · copy 12 ms · paste 9 ms · total 1180 ms
 Two keys set how the recognizer runs: `chunk_seconds` (20 s) is the silence-split
 length, and `threads` (4, clamped to 1..16) is ONNX Runtime's thread count. Both
 are settled with `transcribe --repeat` rather than by feel — see "Measured".
+
+### Text before it is pasted
+
+A transcript goes through a rules pass between the decoder and the clipboard. No
+model, no network: a rule either fires or it does not, which is why these are
+testable and why they cannot invent a word you did not say.
+
+- `cleanup = true` — remove "um", "uh" and friends, collapse an immediately
+  repeated run ("the the"), tidy spacing and stray punctuation.
+- `formatting = true` — spoken addresses: "sean at sign example dot com" becomes
+  `sean@example.com`, "example dot dev" becomes `example.dev`.
+- `punctuation_commands = false` — spoken punctuation. Off by default, because
+  people say "comma" and "period" in prose; on, "hello comma world" becomes
+  "hello, world", and "new paragraph" becomes a blank line. It is text, never an
+  injected Enter.
+- `commands = true` — a whole utterance can be an instruction: "scratch that"
+  discards it, "quit hippo" stops the daemon. It only matches the whole
+  utterance, so a sentence that contains the words is still a sentence.
+- `[[snippets]]` — a trigger phrase that expands to fixed text, on an exact
+  whole-utterance match.
+- `[[replacements]]` — whole-word, case-insensitive substitutions, applied last.
+
+```toml
+punctuation_commands = true
+
+[[snippets]]
+trigger = "my calendar link"
+text = "https://cal.example/sean"
+
+[[replacements]]
+from = "hippo"
+to = "Hippo Voice"
+```
+
+The order is fixed: cleanup, then a command, then a snippet, then punctuation and
+formatting, then replacements — so a snippet is never rewritten by a replacement
+and an address is never broken by one. Capitalisation is left alone: Parakeet
+already sentence-cases its output, and a rule that re-cases would only be able to
+make it worse.
+
+`hippo-voice text "um, mail sean at sign example dot com"` runs the pass on a
+string and prints what would be pasted, which is the fastest way to check a
+dictionary rule.
 
 Hotkeys are the exception: the Windows daemon registers its chords at startup, so
 a new chord needs a restart. Nothing else does.
