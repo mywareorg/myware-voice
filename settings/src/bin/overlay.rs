@@ -167,7 +167,7 @@ impl App {
 
         // A meter that follows the sample exactly flickers; a slow release keeps
         // the glyph readable while still dropping when the room goes quiet.
-        let target = (self.tick.level * 3.2).clamp(0.0, 1.0).powf(0.7);
+        let target = fill_fraction(self.tick.level);
         self.fill = target.max(self.fill * 0.86);
         paint(canvas, WIDTH, HEIGHT, &self.tick, self.fill);
 
@@ -206,6 +206,9 @@ const CAPSULE: (f32, f32, f32, f32) = (52.0, 8.0, 10.0, 34.0); // x, y, half-wid
 const CRADLE: (f32, f32, f32, f32) = (52.0, 39.0, 15.0, 2.6); // cx, cy, radius, thickness
 const STEM: (f32, f32, f32, f32) = (50.5, 54.0, 3.0, 9.0); // x, y, width, height
 const BASE: (f32, f32, f32, f32) = (42.0, 63.0, 20.0, 3.0); // x, y, width, height
+/// The glyph's vertical extent, which is what the fill traverses.
+const GLYPH_TOP: f32 = 8.0;
+const GLYPH_BOTTOM: f32 = 66.0;
 
 impl Canvas<'_> {
     fn rounded_panel(&mut self, radius: f32) {
@@ -223,8 +226,9 @@ impl Canvas<'_> {
         }
     }
 
-    /// The glyph. The capsule fills from its bottom to `fill` of its height; the
-    /// cradle, stem and base stay dim so the shape reads at zero.
+    /// The fill. The whole glyph — capsule, stem and base — fills from its bottom
+    /// up, so the base lights first, then the stem, then the capsule. A fill that
+    /// started at the capsule wasted most of its travel on normal speech levels.
     fn microphone(&mut self, streaming: bool, fill: f32) {
         // Mode, as before: green for ordinary dictation, blue for streaming.
         let lit = if streaming {
@@ -233,24 +237,16 @@ impl Canvas<'_> {
             (76, 175, 122)
         };
         let track = (58, 60, 68);
-        let (_, top, _, height) = CAPSULE;
-        let line = top + height - fill * height;
+        let line = GLYPH_BOTTOM - fill * (GLYPH_BOTTOM - GLYPH_TOP);
 
         for y in 0..self.height {
             for x in 0..self.width {
                 let px = x as f32 + 0.5;
                 let py = y as f32 + 0.5;
-                let colour = if in_capsule(px, py) {
-                    if py >= line {
-                        lit
-                    } else {
-                        track
-                    }
-                } else if in_stand(px, py) {
-                    track
-                } else {
+                if !in_capsule(px, py) && !in_stand(px, py) {
                     continue;
-                };
+                }
+                let colour = if py >= line { lit } else { track };
                 let offset = ((y * self.width + x) * 4) as usize;
                 self.pixels[offset] = colour.2;
                 self.pixels[offset + 1] = colour.1;
@@ -261,7 +257,17 @@ impl Canvas<'_> {
     }
 }
 
-/// Is this point inside the capsule — the part that fills?
+/// How full the glyph should be for an RMS level.
+///
+/// In dB, because loudness is: -40 dB (a quiet room, RMS 0.01) is empty and -12 dB
+/// (RMS 0.25) is full. A linear mapping spent most of its travel on levels speech
+/// never reaches, which is why the glyph looked frozen at a fifth of its height.
+fn fill_fraction(level: f32) -> f32 {
+    let db = 20.0 * level.max(1e-6).log10();
+    ((db + 40.0) / 28.0).clamp(0.0, 1.0)
+}
+
+/// Is this point inside the capsule?
 fn in_capsule(x: f32, y: f32) -> bool {
     let (cx, top, half_w, height) = CAPSULE;
     let bottom = top + height;

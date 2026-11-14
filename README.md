@@ -352,10 +352,14 @@ the cost of not supporting X11 yet, and it is visible rather than silent.
 ## Listening popup
 
 While a capture is running the daemon shows a small panel in the top right of the
-focused screen: a microphone that **fills from the bottom with your voice**. How
-much of it is lit is the level, with a fast rise and a slow fall, so it reads at a
-glance in peripheral vision — which a row of bars, moving two pixels per column,
-did not.
+focused screen: a microphone that **fills from the bottom with your voice**, base
+first and capsule last. How much of it is lit is the level, with a fast rise and a
+slow fall, so it reads at a glance in peripheral vision — which a row of bars,
+moving two pixels per column, did not.
+
+The mapping is in decibels, not linear: −40 dB (a quiet room, RMS 0.01) is empty
+and −12 dB (RMS 0.25) is full. Linear put ordinary speech at a fifth of the glyph,
+which read as a meter that never moved.
 
 Its colour is the **mode**: green is ordinary dictation, where the transcript is
 pasted when you stop, and blue is streaming, where phrases are committed as you
