@@ -111,6 +111,11 @@ pub struct Status {
     /// config stays in force.
     #[serde(default)]
     pub config_error: Option<String>,
+    /// Why the last dictation failed, if it did: a model that will not load, a
+    /// decoder that panicked, a clipboard tool that is not installed. Cleared
+    /// when a transcript is delivered, so it always describes the last cycle.
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 /// Columns in the popup's frequency meter.
@@ -131,6 +136,7 @@ impl Default for Status {
             paste: String::new(),
             config_revision: 0,
             config_error: None,
+            last_error: None,
         }
     }
 }
@@ -190,6 +196,8 @@ pub struct Reply {
     pub config_revision: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -357,38 +365,54 @@ struct Daemon {
 }
 
 impl Daemon {
+    /// Handle one event. Any failure is recorded, reported and cleared up here so
+    /// the run loop only has to keep going.
     fn handle(&mut self, event: Event) -> Result<()> {
+        match self.dispatch(event) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.fail(&format!("{error:#}"));
+                Err(error)
+            }
+        }
+    }
+
+    fn dispatch(&mut self, event: Event) -> Result<()> {
         match event {
             Event::Toggle => self.toggle(),
             Event::ToggleStream => self.toggle_stream(),
             // Handled by the run loop, which breaks out of it.
             Event::Quit => Ok(()),
-            Event::Decoded { generation, text } => {
-                let outcome = self.delivered(generation, text);
-                // A failed copy or paste must not leave the daemon stuck in
-                // Decoding: the next press would be read as "cancel", not "record".
-                if outcome.is_err() {
-                    self.set(Phase::Idle);
-                }
-                outcome
-            }
+            Event::Decoded { generation, text } => self.delivered(generation, text),
             Event::Streamed {
                 generation,
                 text,
                 final_chunk,
-            } => {
-                let outcome = self.streamed(generation, text, final_chunk);
-                if outcome.is_err() {
-                    self.set(Phase::Idle);
-                }
-                outcome
-            }
+            } => self.streamed(generation, text, final_chunk),
             Event::Failed(error) => {
-                note_error(&format!("failed: {error}"));
-                self.stop_recording();
-                self.set(Phase::Idle);
+                self.fail(&error);
                 Ok(())
             }
+        }
+    }
+
+    /// Record why a dictation did not happen, and say so.
+    ///
+    /// The tone only says "started" and "done"; without this the signal for a
+    /// model that will not load, or a paste tool that is no longer installed, is
+    /// a transcript that never arrives. The reason goes into `status`, which a
+    /// client or the overlay can read, and to a desktop notification for the user
+    /// who is looking at the window they were typing in.
+    fn fail(&mut self, reason: &str) {
+        note_error(&format!("failed: {reason}"));
+        self.stop_recording();
+        self.set(Phase::Idle);
+        if let Ok(mut status) = self.status.lock() {
+            status.last_error = Some(reason.to_string());
+        }
+        // A test run must not pop a notification on the machine running it.
+        if !self.fake_delivery {
+            inject::notify("Hippo Voice did not transcribe", reason);
         }
     }
 
@@ -961,6 +985,7 @@ impl Daemon {
 
         if self.fake_delivery {
             log::write("delivered (fake delivery)");
+            self.clear_error();
             self.set(Phase::Idle);
             return Ok(());
         }
@@ -998,8 +1023,16 @@ impl Daemon {
             "delivered {} chars",
             text.trim_end().chars().count()
         ));
+        self.clear_error();
         self.set(Phase::Idle);
         Ok(())
+    }
+
+    /// A transcript that landed means the last failure is no longer the last word.
+    fn clear_error(&mut self) {
+        if let Ok(mut status) = self.status.lock() {
+            status.last_error = None;
+        }
     }
 
     /// Stop by itself once a capture passes the configured maximum, so a stuck
@@ -1237,6 +1270,8 @@ fn silent_tail(samples: &[f32], rate: u32) -> bool {
 /// the `hippo-voice-daemon` binary call; the configuration is read inside `run`,
 /// which also re-reads it when the file changes.
 pub fn run_process() -> Result<()> {
+    // Before anything that can panic: a crash has to leave a line behind.
+    crate::log::install_panic_hook();
     crate::log::write(&format!(
         "daemon: starting {} ({})",
         env!("CARGO_PKG_VERSION"),
@@ -1273,6 +1308,17 @@ pub fn run(model_dir: PathBuf, threads: i32) -> Result<()> {
         }
     };
     let config_stamp = Stamp::of(&config_path);
+    // `resolve_dir` returns an installed path whether or not the files are there,
+    // so a fresh install would otherwise fail at the first utterance with no
+    // explanation. An empty path means a fake recognizer is in play.
+    let model_problem = if model_dir.as_os_str().is_empty() {
+        None
+    } else {
+        crate::model::unusable_reason(&model_dir)
+    };
+    if let Some(problem) = &model_problem {
+        note_error(&format!("model: {problem}"));
+    }
     if let Some(dir) = transport::endpoint_path()?.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -1291,6 +1337,15 @@ pub fn run(model_dir: PathBuf, threads: i32) -> Result<()> {
         });
         view.paste = config.paste.to_string();
         view.config_error = config_error.clone();
+        view.last_error = model_problem.clone();
+    }
+
+    if let Some(problem) = &model_problem {
+        // The one failure worth interrupting for: without a model nothing works,
+        // and the fix is a command the user has to be told.
+        if !fake_delivery() {
+            inject::notify("Hippo Voice has no model", problem);
+        }
     }
 
     #[cfg(windows)]
@@ -1363,15 +1418,10 @@ pub fn run(model_dir: PathBuf, threads: i32) -> Result<()> {
     loop {
         match events_rx.recv_timeout(TICK) {
             Ok(Event::Quit) => break,
-            Ok(Event::Toggle) => {
-                if let Err(error) = daemon.handle(Event::Toggle) {
-                    note_error(&format!("toggle: {error:#}"));
-                }
-            }
+            // `handle` records any failure in `status`, notifies and resets the
+            // phase itself, so the loop only has to keep going.
             Ok(event) => {
-                if let Err(error) = daemon.handle(event) {
-                    note_error(&format!("event: {error:#}"));
-                }
+                let _ = daemon.handle(event);
             }
             Err(RecvTimeoutError::Timeout) => {
                 daemon.reload_config();
@@ -1444,6 +1494,7 @@ fn serve(
                 paste: None,
                 config_revision: None,
                 config_error: None,
+                last_error: None,
                 error: None,
             }
         }
@@ -1461,6 +1512,7 @@ fn serve(
                 paste: None,
                 config_revision: None,
                 config_error: None,
+                last_error: None,
                 error: None,
             }
         }
@@ -1478,6 +1530,7 @@ fn serve(
                 paste: Some(snapshot.paste),
                 config_revision: Some(snapshot.config_revision),
                 config_error: snapshot.config_error,
+                last_error: snapshot.last_error,
                 error: None,
             }
         }
@@ -1493,6 +1546,7 @@ fn serve(
             paste: None,
             config_revision: None,
             config_error: None,
+            last_error: None,
             error: Some(format!("unknown command {other:?}")),
         },
     };
@@ -1500,6 +1554,163 @@ fn serve(
     serde_json::to_writer(&mut stream, &reply)?;
     stream.write_all(b"\n")?;
     Ok(())
+}
+
+/// How long `HIPPO_VOICE_FAKE_DECODE=slow` spends per job. Long enough that a
+/// second press lands while the decoder is still working, which is the case the
+/// phase machine has to survive.
+const SLOW_DECODE: Duration = Duration::from_millis(400);
+
+/// State for the decoder thread: one warm recognizer, plus the two test switches.
+///
+/// A `struct` rather than a pile of locals because the panic boundary has to cover
+/// the work but not the channel: the loop keeps running, the recognizer is thrown
+/// away, and `Event::Failed` tells the user what happened.
+struct Decoder<'a> {
+    loaded: Option<crate::sherpa::Recognizer>,
+    model_dir: &'a Path,
+    threads: i32,
+    generation: &'a AtomicU64,
+    /// A canned transcript, when the tests asked for one.
+    fake: Option<&'a str>,
+    /// `HIPPO_VOICE_FAKE_DECODE`: `panic` fails the first decode, `slow` delays
+    /// every one.
+    fake_decode: Option<&'a str>,
+    /// Set before the fake panic fires, so only the first decode fails and the
+    /// recovery is testable.
+    panicked: bool,
+}
+
+impl Decoder<'_> {
+    /// Decode one job. `None` when it produced nothing worth reporting.
+    fn run(&mut self, job: DecodeJob) -> Option<Event> {
+        if matches!(&job, DecodeJob::Decode { .. } | DecodeJob::Stream { .. }) {
+            self.misbehave();
+        }
+        match job {
+            DecodeJob::Warm => {
+                if self.fake.is_some() {
+                    return None;
+                }
+                // Warm is the load overlapped with the first words; a failure
+                // here is reported once and the decode reports it again rather
+                // than loading twice.
+                self.ensure_loaded().err()
+            }
+            DecodeJob::Stream {
+                samples,
+                generation,
+                final_chunk,
+            } => {
+                if let Some(canned) = self.fake {
+                    thread::sleep(Duration::from_millis(20));
+                    return Some(Event::Streamed {
+                        generation,
+                        text: canned.to_string(),
+                        final_chunk,
+                    });
+                }
+                if self.generation.load(Ordering::SeqCst) != generation {
+                    return None;
+                }
+                if let Err(failure) = self.ensure_loaded() {
+                    return Some(failure);
+                }
+                let recognizer = self.loaded.as_ref()?;
+                match recognizer.transcribe(&samples) {
+                    Ok(text) if self.generation.load(Ordering::SeqCst) == generation => {
+                        Some(Event::Streamed {
+                            generation,
+                            text,
+                            final_chunk,
+                        })
+                    }
+                    Ok(_) => None,
+                    Err(error) => Some(Event::Failed(format!("{error:#}"))),
+                }
+            }
+            DecodeJob::Unload => {
+                self.loaded = None;
+                None
+            }
+            DecodeJob::Decode {
+                samples,
+                generation,
+                chunk_seconds,
+            } => {
+                if let Some(canned) = self.fake {
+                    // Stand in for a real decode, including its latency shape.
+                    // Checked first: a fake run has no model on disk to load.
+                    thread::sleep(Duration::from_millis(20));
+                    return Some(Event::Decoded {
+                        generation,
+                        text: canned.to_string(),
+                    });
+                }
+                if let Err(failure) = self.ensure_loaded() {
+                    return Some(failure);
+                }
+                let recognizer = self.loaded.as_ref()?;
+
+                // Cut at silences, and stop between chunks if the user pressed
+                // the key again. A single decode call is not interruptible, so
+                // the chunk boundary is the cancel granularity.
+                let mut parts = Vec::new();
+                for (start, end) in crate::audio::split_at_silence(&samples, chunk_seconds) {
+                    if self.generation.load(Ordering::SeqCst) != generation {
+                        return None;
+                    }
+                    match recognizer.transcribe(&samples[start..end]) {
+                        Ok(text) if !text.is_empty() => parts.push(text),
+                        Ok(_) => {}
+                        Err(error) => return Some(Event::Failed(format!("{error:#}"))),
+                    }
+                }
+                Some(Event::Decoded {
+                    generation,
+                    text: parts.join(" "),
+                })
+            }
+        }
+    }
+
+    /// Load on demand, returning the event to report when the load fails.
+    fn ensure_loaded(&mut self) -> std::result::Result<(), Event> {
+        if self.loaded.is_some() {
+            return Ok(());
+        }
+        match load(self.model_dir, self.threads) {
+            Ok(recognizer) => {
+                self.loaded = Some(recognizer);
+                Ok(())
+            }
+            Err(error) => Err(Event::Failed(format!("{error:#}"))),
+        }
+    }
+
+    /// The test-only misbehaviour switch. A real decoder has no equivalent, which
+    /// is why it lives behind an environment variable rather than a config key.
+    fn misbehave(&mut self) {
+        match self.fake_decode {
+            Some("panic") if !self.panicked => {
+                self.panicked = true;
+                panic!("fake decoder panic");
+            }
+            Some("slow") => thread::sleep(SLOW_DECODE),
+            _ => {}
+        }
+    }
+}
+
+/// What a panic payload says, since Rust keeps it as an `Any`.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_string()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "no message".to_string()
+    }
 }
 
 fn decoder_loop(
@@ -1510,125 +1721,35 @@ fn decoder_loop(
     generation: Arc<AtomicU64>,
     fake: Option<String>,
 ) {
-    let mut loaded: Option<crate::sherpa::Recognizer> = None;
+    let fake_decode = std::env::var("HIPPO_VOICE_FAKE_DECODE").ok();
+    let mut decoder = Decoder {
+        loaded: None,
+        model_dir: &model_dir,
+        threads,
+        generation: &generation,
+        fake: fake.as_deref(),
+        fake_decode: fake_decode.as_deref(),
+        panicked: false,
+    };
 
     while let Ok(job) = jobs.recv() {
-        match job {
-            DecodeJob::Warm => {
-                if fake.is_some() {
-                    continue;
-                }
-                if loaded.is_none() {
-                    match load(&model_dir, threads) {
-                        Ok(pair) => loaded = Some(pair),
-                        Err(error) => {
-                            let _ = events.send(Event::Failed(format!("{error:#}")));
-                        }
-                    }
-                }
+        // A panic in a decode must cost one dictation, not the session: the
+        // receiver lives out here, so the thread survives and the next press
+        // still works.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decoder.run(job)));
+        match outcome {
+            Ok(Some(event)) => {
+                let _ = events.send(event);
             }
-            DecodeJob::Stream {
-                samples,
-                generation: job_generation,
-                final_chunk,
-            } => {
-                if let Some(canned) = &fake {
-                    thread::sleep(Duration::from_millis(20));
-                    let _ = events.send(Event::Streamed {
-                        generation: job_generation,
-                        text: canned.clone(),
-                        final_chunk,
-                    });
-                    continue;
-                }
-                if generation.load(Ordering::SeqCst) != job_generation {
-                    continue;
-                }
-                if loaded.is_none() {
-                    match load(&model_dir, threads) {
-                        Ok(pair) => loaded = Some(pair),
-                        Err(error) => {
-                            let _ = events.send(Event::Failed(format!("{error:#}")));
-                            continue;
-                        }
-                    }
-                }
-                let Some(recognizer) = loaded.as_ref() else {
-                    continue;
-                };
-                match recognizer.transcribe(&samples) {
-                    Ok(text) => {
-                        if generation.load(Ordering::SeqCst) == job_generation {
-                            let _ = events.send(Event::Streamed {
-                                generation: job_generation,
-                                text,
-                                final_chunk,
-                            });
-                        }
-                    }
-                    Err(error) => {
-                        let _ = events.send(Event::Failed(format!("{error:#}")));
-                    }
-                }
-            }
-            DecodeJob::Unload => {
-                loaded = None;
-            }
-            DecodeJob::Decode {
-                samples,
-                generation: job_generation,
-                chunk_seconds,
-            } => {
-                if let Some(canned) = &fake {
-                    // Stand in for a real decode, including its latency shape.
-                    // Checked first: a fake run has no model on disk to load.
-                    thread::sleep(Duration::from_millis(20));
-                    let _ = events.send(Event::Decoded {
-                        generation: job_generation,
-                        text: canned.clone(),
-                    });
-                    continue;
-                }
-                if loaded.is_none() {
-                    match load(&model_dir, threads) {
-                        Ok(pair) => loaded = Some(pair),
-                        Err(error) => {
-                            let _ = events.send(Event::Failed(format!("{error:#}")));
-                            continue;
-                        }
-                    }
-                }
-
-                let Some(recognizer) = loaded.as_ref() else {
-                    continue;
-                };
-
-                // Cut at silences, and stop between chunks if the user pressed
-                // the key again. A single decode call is not interruptible, so
-                // the chunk boundary is the cancel granularity.
-                let mut parts = Vec::new();
-                let mut abandoned = false;
-                for (start, end) in crate::audio::split_at_silence(&samples, chunk_seconds) {
-                    if generation.load(Ordering::SeqCst) != job_generation {
-                        abandoned = true;
-                        break;
-                    }
-                    match recognizer.transcribe(&samples[start..end]) {
-                        Ok(text) if !text.is_empty() => parts.push(text),
-                        Ok(_) => {}
-                        Err(error) => {
-                            let _ = events.send(Event::Failed(format!("{error:#}")));
-                            abandoned = true;
-                            break;
-                        }
-                    }
-                }
-                if !abandoned {
-                    let _ = events.send(Event::Decoded {
-                        generation: job_generation,
-                        text: parts.join(" "),
-                    });
-                }
+            Ok(None) => {}
+            Err(payload) => {
+                // The recognizer was inside a native call when it unwound, so its
+                // state is unknown. Drop it: the next capture loads a fresh one.
+                decoder.loaded = None;
+                let _ = events.send(Event::Failed(format!(
+                    "the decoder panicked: {}",
+                    panic_message(&*payload)
+                )));
             }
         }
     }

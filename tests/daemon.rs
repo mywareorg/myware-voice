@@ -54,7 +54,9 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn start(name: &str, config_text: &str, extra: &[(&str, &str)]) -> Self {
+    /// `model` is the canned transcript for a fake recognizer, or `None` to run
+    /// against a real model directory, which the caller points at with `extra`.
+    fn start(name: &str, config_text: &str, model: Option<&str>, extra: &[(&str, &str)]) -> Self {
         let temp = Temp::new(name);
         let runtime = temp.0.join("run");
         let state_home = temp.0.join("state");
@@ -85,10 +87,12 @@ impl Fixture {
             // suite should have to care where it lives.
             .env("HIPPO_VOICE_CONFIG", &config_path)
             .env("HIPPO_VOICE_FAKE_AUDIO", &wav)
-            .env("HIPPO_VOICE_FAKE_MODEL", "hello from the test")
             .env("HIPPO_VOICE_FAKE_DELIVERY", "1")
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        if let Some(canned) = model {
+            command.env("HIPPO_VOICE_FAKE_MODEL", canned);
+        }
         for (key, value) in extra {
             command.env(key, value);
         }
@@ -161,6 +165,7 @@ fn round_trip(name: &str, extra: &[(&str, &str)]) -> Option<String> {
     let _fixture = Fixture::start(
         name,
         "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("hello from the test"),
         extra,
     );
     deliver_once()
@@ -190,6 +195,7 @@ fn an_edited_config_is_picked_up_without_a_restart() {
     let fixture = Fixture::start(
         "reload",
         "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("hello from the test"),
         &[],
     );
 
@@ -219,6 +225,7 @@ fn a_config_that_does_not_parse_keeps_the_last_good_one() {
     let fixture = Fixture::start(
         "broken",
         "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("hello from the test"),
         &[],
     );
 
@@ -255,4 +262,85 @@ fn a_config_that_does_not_parse_keeps_the_last_good_one() {
     let fixed = daemon::request("status").expect("status");
     assert_eq!(fixed.paste.as_deref(), Some("wtype"));
     assert_eq!(fixed.config_error, None);
+}
+
+#[test]
+fn a_panicking_decode_is_reported_and_the_next_press_still_records() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let _fixture = Fixture::start(
+        "panic",
+        "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("hello from the test"),
+        &[("HIPPO_VOICE_FAKE_DECODE", "panic")],
+    );
+
+    daemon::request("toggle").expect("toggle on");
+    assert!(
+        wait_until(
+            || daemon::request("status")
+                .ok()
+                .is_some_and(|status| status.phase.as_deref() == Some("recording")),
+            Duration::from_secs(5)
+        ),
+        "the daemon never started recording"
+    );
+    std::thread::sleep(Duration::from_millis(150));
+    daemon::request("toggle").expect("toggle off");
+
+    assert!(
+        wait_until(
+            || daemon::request("status").ok().is_some_and(|status| {
+                status.phase.as_deref() == Some("idle") && status.last_error.is_some()
+            }),
+            Duration::from_secs(15)
+        ),
+        "the daemon never reported the panic, or never left the decoding phase"
+    );
+    let reported = daemon::request("status")
+        .expect("status")
+        .last_error
+        .expect("a reason");
+    assert!(
+        reported.contains("panicked"),
+        "the reason does not say what happened: {reported}"
+    );
+
+    // The point of the supervision: the decoder thread outlives the panic.
+    let text = deliver_once();
+    assert_eq!(text.as_deref(), Some("hello from the test"));
+    assert_eq!(
+        daemon::request("status").expect("status").last_error,
+        None,
+        "the failure outlived the transcript that followed it"
+    );
+}
+
+#[test]
+fn a_missing_model_is_reported_at_startup() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    // A directory that exists and holds nothing: `resolve_dir` honours the
+    // override, so the daemon starts and finds no model in it.
+    let holder = Temp::new("no-model-dir");
+    let model_dir = holder.0.join("empty-model");
+    std::fs::create_dir_all(&model_dir).expect("create the empty model directory");
+
+    let _fixture = Fixture::start(
+        "no-model",
+        "paste = \"none\"\ntones = false\n",
+        None,
+        &[("HIPPO_VOICE_MODEL_DIR", model_dir.to_str().expect("utf-8"))],
+    );
+
+    let reported = daemon::request("status")
+        .expect("status")
+        .last_error
+        .expect("the daemon started without saying the model was missing");
+    assert!(
+        reported.contains("no usable model"),
+        "unexpected reason: {reported}"
+    );
+    assert!(
+        reported.contains("model download"),
+        "the reason does not say what to do about it: {reported}"
+    );
 }

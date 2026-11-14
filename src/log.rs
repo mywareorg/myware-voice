@@ -135,6 +135,19 @@ pub fn error(message: &str) {
     let _ = writeln!(file, "[{}] {message}", stamp(now()));
 }
 
+/// Record panics in the log, keeping the default hook's stderr output.
+///
+/// A release build on Windows has no console, so a panic that is not written down
+/// leaves nothing to report. The default hook still runs: `RUST_BACKTRACE` is
+/// what produces the useful detail, and this only guarantees a line survives.
+pub fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        error(&format!("panic: {info}"));
+        previous(info);
+    }));
+}
+
 /// The last `count` lines of the log.
 pub fn tail(count: usize) -> Result<Vec<String>> {
     let path = path()?;

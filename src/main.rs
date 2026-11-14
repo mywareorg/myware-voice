@@ -193,6 +193,9 @@ fn main() -> Result<()> {
             if let Some(error) = reply.config_error {
                 println!("config: {error}");
             }
+            if let Some(error) = reply.last_error {
+                println!("last error: {error}");
+            }
             if let Some(text) = reply.text {
                 println!("last: {text}");
             }

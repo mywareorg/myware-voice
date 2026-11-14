@@ -82,9 +82,22 @@ config: revision 3
 Hotkeys are the exception: the Windows daemon registers its chords at startup, so
 a new chord needs a restart. Nothing else does.
 
+A failed dictation is reported the same way: the reason is in `status` as
+`last error`, it is in the log, and it is a desktop notification, because the
+user's attention is in the window they were typing in. A transcript that lands
+clears it. A missing model is caught at startup rather than at the first press:
+
+```
+last error: no usable model in /home/me/.local/share/hippo-voice/models (missing encoder.int8.onnx, decoder.int8.onnx, joiner.int8.onnx, tokens.txt); run `hippo-voice model download`
+```
+
+The decoder runs on its own thread behind a panic boundary: a panic costs one
+dictation — the model is dropped, the reason is reported, and the next press
+loads a fresh one — instead of wedging the daemon in `decoding` for the session.
+
 ## Testing
 
-Four environment variables let the whole pipeline run with no microphone and no
+Five environment variables let the whole pipeline run with no microphone and no
 model, which is how `tests/daemon.rs` drives a real daemon over its real socket
 on CI:
 
@@ -94,6 +107,9 @@ on CI:
   or focused window is needed.
 - `HIPPO_VOICE_CONFIG` — the config file, named outright rather than derived from
   `XDG_CONFIG_HOME`, so a test can move just the config and rewrite it mid-run.
+- `HIPPO_VOICE_FAKE_DECODE` — break the fake decoder on purpose: `panic` fails the
+  first decode, which is how the supervision around it is tested; `slow` delays
+  every decode so a second press arrives mid-decode.
 
 ## Measured
 

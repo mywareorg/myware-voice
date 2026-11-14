@@ -138,6 +138,32 @@ pub fn verify_streaming(dir: &Path) -> Result<bool> {
         .all(|(_, state, _)| state == State::Present))
 }
 
+/// Why this directory cannot be used as a model, if it cannot.
+///
+/// Presence only, never a hash: this runs at daemon startup and must not read
+/// 640 MB before the first press. The point is to say so before the first
+/// utterance rather than after it, when the silence looks like a broken app.
+pub fn unusable_reason(dir: &Path) -> Option<String> {
+    let rows = match inspect(dir, false) {
+        Ok(rows) => rows,
+        Err(error) => return Some(format!("{error:#}")),
+    };
+    let missing: Vec<&str> = rows
+        .iter()
+        .filter(|(_, state, _)| *state != State::Present)
+        .map(|(file, _, _)| file.name.as_str())
+        .collect();
+    if missing.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "no usable model in {} (missing {}); run `hippo-voice model download`",
+            dir.display(),
+            missing.join(", ")
+        ))
+    }
+}
+
 pub fn sha256_of(path: &Path) -> Result<String> {
     let mut file = File::open(path).with_context(|| format!("open {}", path.display()))?;
     let mut hasher = Sha256::new();
