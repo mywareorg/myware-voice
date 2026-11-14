@@ -90,6 +90,11 @@ pub struct Config {
     /// committing, so a word is not cut in two. The word-by-word model ignores
     /// it.
     pub stream_seconds: f32,
+    /// Force a streaming phrase handoff after this many seconds even when the
+    /// speaker never pauses. The online encoder's context is unbounded on paper
+    /// but grows without limit in practice, and a monologue with no endpoint
+    /// would otherwise keep one head alive for the whole session.
+    pub stream_segment_seconds: f32,
     /// Keep delivered transcripts at rest. Off by default: the app's premise is
     /// that transcripts stay where the user puts them.
     pub history: bool,
@@ -110,6 +115,7 @@ impl Default for Config {
             hotkey: "ctrl+space".to_string(),
             stream_hotkey: "ctrl+shift+space".to_string(),
             stream_seconds: 3.0,
+            stream_segment_seconds: 8.0,
             history: false,
             history_days: 30,
         }

@@ -197,11 +197,14 @@ run.** What is wired:
 - **Streaming mode** (`ctrl+shift+space`) records continuously and pastes text
   while you speak. When the streaming zipformer package is installed it is
   word-by-word: a 73 MB online model keeps decoder state, and only words that
-  survive one revision are pasted. Without that package it falls back to
-  Parakeet phrase chunks committed at pauses near `stream_seconds` (3 s by
-  default, editable in settings). Either way the session stops if focus changes,
-  because continuing would paste into the wrong window. `stream_hotkey`,
-  `stream_seconds` and `HIPPO_VOICE_STREAMING_MODEL_DIR` are config knobs.
+  survive one revision are pasted. A phrase handoff (endpoint, or
+  `stream_segment_seconds` without a pause, 8 s by default) flushes the text and
+  resets the decoder, so a long monologue cannot grow one unbounded head. Without
+  that package it falls back to Parakeet phrase chunks committed at pauses near
+  `stream_seconds` (3 s, editable in settings). Either way the session stops if
+  focus changes, because continuing would paste into the wrong window.
+  `stream_hotkey`, `stream_seconds`, `stream_segment_seconds` and
+  `HIPPO_VOICE_STREAMING_MODEL_DIR` are config knobs.
 - The transport is loopback TCP on an ephemeral port with a per-run token in the
   state directory: an open port is not authority to open a microphone.
 - Delivery is `arboard` for the clipboard and `enigo` (`SendInput`) for the chord.

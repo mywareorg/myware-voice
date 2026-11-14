@@ -320,6 +320,7 @@ struct Daemon {
     /// Word-by-word path: a streaming zipformer stream kept for the session.
     online: Option<crate::sherpa::OnlineStream>,
     online_fed: usize,
+    online_segment_start: usize,
     online_last: String,
     online_pasted: String,
 }
@@ -401,6 +402,7 @@ impl Daemon {
             } else {
                 // The audio already in the recorder was not part of this mode.
                 self.online_fed = committed;
+                self.online_segment_start = committed;
             }
             if let Ok(mut status) = self.status.lock() {
                 status.streaming = true;
@@ -465,6 +467,7 @@ impl Daemon {
         let recognizer = Arc::new(sherpa.online_recognizer(&dir, 4)?);
         self.online = Some(recognizer.stream()?);
         self.online_fed = 0;
+        self.online_segment_start = 0;
         self.online_last.clear();
         self.online_pasted.clear();
         log::write(&format!("streaming model {}", dir.display()));
@@ -680,13 +683,27 @@ impl Daemon {
         };
         self.online_fed = mono.len();
 
-        if endpoint {
+        let since_handoff =
+            (self.online_fed - self.online_segment_start) as f32 / rate.max(1) as f32;
+        let target = self.config.stream_segment_seconds.max(2.0);
+        // Prefer to hand off at a pause, but never let one head grow past 1.5x
+        // the target when a monologue has no pause at all.
+        let handoff =
+            since_handoff >= target && (silent_tail(&mono, rate) || since_handoff >= target * 1.5);
+
+        if endpoint || handoff {
+            if handoff && !endpoint {
+                log::write(&format!(
+                    "streaming: handed off after {since_handoff:.1}s without an endpoint"
+                ));
+            }
             self.commit_online_final(&hypothesis)?;
             if let Some(stream) = self.online.as_ref() {
                 stream.reset();
             }
             self.online_last.clear();
             self.online_pasted.clear();
+            self.online_segment_start = self.online_fed;
         } else {
             self.commit_online(&hypothesis)?;
             self.online_last = hypothesis;
@@ -702,13 +719,12 @@ impl Daemon {
             return Ok(());
         }
         if !stable.starts_with(&self.online_pasted) {
-            inject::notify(
-                "Streaming stopped",
-                "The recognizer revised text that was already pasted",
-            );
-            return Err(anyhow!(
-                "streaming hypothesis changed after it was pasted; stopping"
-            ));
+            // The model revised a word that is already in the document. It
+            // cannot be taken back without editing the user's text, so keep the
+            // head alive until the next endpoint or forced handoff starts a new
+            // segment instead of stopping the whole session.
+            log::write("streaming: revision past the pasted prefix; waiting for handoff");
+            return Ok(());
         }
         let suffix = stable[self.online_pasted.len()..].trim();
         if suffix.is_empty() {
@@ -732,13 +748,8 @@ impl Daemon {
         } else if let Some(rest) = text.strip_prefix(pasted) {
             rest.trim()
         } else {
-            inject::notify(
-                "Streaming stopped",
-                "The recognizer revised text that was already pasted",
-            );
-            return Err(anyhow!(
-                "streaming hypothesis changed after it was pasted; stopping"
-            ));
+            log::write("streaming: final phrase revised pasted text; not re-pasting it");
+            return Ok(());
         };
         if !suffix.is_empty() {
             self.deliver_stream(suffix, false)?;
@@ -1000,6 +1011,7 @@ impl Daemon {
             self.streaming = false;
             self.online = None;
             self.online_fed = 0;
+            self.online_segment_start = 0;
             self.online_last.clear();
             self.online_pasted.clear();
         }
@@ -1188,6 +1200,7 @@ pub fn run(config: Config, model_dir: PathBuf, threads: i32) -> Result<()> {
         stream_text: String::new(),
         online: None,
         online_fed: 0,
+        online_segment_start: 0,
         online_last: String::new(),
         online_pasted: String::new(),
     };

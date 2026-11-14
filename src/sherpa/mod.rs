@@ -719,6 +719,81 @@ mod resolution {
         assert!(text.contains("HIPPO_VOICE_SHERPA_DIR"), "{text}");
     }
 
+    /// Diagnostic for long dictation: confirms the online stream keeps
+    /// producing a prefix-stable hypothesis and endpoints on its own.
+    #[test]
+    #[ignore = "needs HIPPO_VOICE_STREAMING_MODEL_DIR and HIPPO_VOICE_SMOKE_WAV"]
+    fn the_online_recognizer_survives_a_long_stream() {
+        let dir = std::env::var("HIPPO_VOICE_STREAMING_MODEL_DIR").expect("model dir");
+        let wav = std::env::var("HIPPO_VOICE_SMOKE_WAV").expect("wav path");
+        let sherpa = Sherpa::open().expect("sherpa");
+        let recognizer = Arc::new(
+            sherpa
+                .online_recognizer(Path::new(&dir), 4)
+                .expect("online recognizer"),
+        );
+        let stream = recognizer.stream().expect("stream");
+        let (samples, rate) = crate::audio::read_wav(Path::new(&wav)).expect("wav");
+        let step = (rate as usize / 20).max(160);
+        let mut fed = 0usize;
+        let mut pasted = String::new();
+        let mut last = String::new();
+        let mut segments = 0usize;
+
+        for chunk in samples.chunks(step) {
+            stream.accept(chunk, rate).expect("accept");
+            fed += chunk.len();
+            let text = stream.text().expect("text");
+            if stream.endpoint() {
+                println!(
+                    "endpoint at {:.1}s: {} chars",
+                    fed as f32 / rate as f32,
+                    text.chars().count()
+                );
+                assert!(
+                    pasted.is_empty() || text.trim().starts_with(pasted.trim()),
+                    "prefix lost at endpoint: pasted {pasted:?}, text {text:?}"
+                );
+                pasted.clear();
+                last.clear();
+                stream.reset();
+                segments += 1;
+                continue;
+            }
+            let mut common = String::new();
+            for (a, b) in last.chars().zip(text.chars()) {
+                if a != b {
+                    break;
+                }
+                common.push(a);
+            }
+            let stable = match common.rfind(' ') {
+                Some(index) => common[..index].trim_end().to_string(),
+                None => String::new(),
+            };
+            if stable.len() > pasted.len() {
+                assert!(
+                    stable.starts_with(&pasted),
+                    "prefix lost at {:.1}s: pasted {pasted:?}, stable {stable:?}",
+                    fed as f32 / rate as f32
+                );
+                pasted = stable;
+            }
+            last = text;
+            if fed % (rate as usize) < step {
+                println!(
+                    "t={:.0}s text={} chars pasted={} chars",
+                    fed as f32 / rate as f32,
+                    last.chars().count(),
+                    pasted.chars().count()
+                );
+            }
+        }
+        let final_text = stream.finish().expect("finish");
+        println!("segments={segments} final={final_text:?}");
+        assert!(!pasted.is_empty() || !final_text.is_empty());
+    }
+
     /// Not part of the normal suite: it needs a downloaded streaming package and
     /// a WAV, so it is the one test that exercises the online C API and its
     /// struct layouts. Run with both variables set and `--ignored`.

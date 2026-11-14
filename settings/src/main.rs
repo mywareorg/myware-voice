@@ -22,6 +22,7 @@ const SYSTEM_DEFAULT: &str = "System default";
 const CHUNKS: [&str; 4] = ["10 s", "15 s", "20 s", "30 s"];
 /// Fallback phrase length for streaming when the online model is absent.
 const STREAM_CHUNKS: [&str; 5] = ["1.0 s", "1.5 s", "2.0 s", "3.0 s", "5.0 s"];
+const STREAM_SEGMENTS: [&str; 4] = ["5 s", "8 s", "12 s", "20 s"];
 
 /// The header mark, in logical pixels. It sits inside the control height beside
 /// the title, and 128 px of source cover a 4x display.
@@ -76,6 +77,7 @@ enum Message {
     Hotkey(String),
     StreamHotkey(String),
     StreamChunk(&'static str),
+    StreamSegment(&'static str),
     Theme(AppTheme),
     Chunk(&'static str),
     ToggleTones,
@@ -211,6 +213,12 @@ impl Settings {
                     .trim_end_matches(" s")
                     .parse()
                     .unwrap_or(self.config.stream_seconds);
+            }
+            Message::StreamSegment(label) => {
+                self.config.stream_segment_seconds = label
+                    .trim_end_matches(" s")
+                    .parse()
+                    .unwrap_or(self.config.stream_segment_seconds);
             }
             Message::Theme(mode) => self.mode = mode,
             Message::Chunk(label) => {
@@ -431,6 +439,19 @@ impl Settings {
             text("Fallback phrase length when the word-by-word model is not installed. Shorter chunks appear sooner but cut words more often.")
                 .size(tokens::TEXT_XS)
                 .color(scheme.muted),
+            settings_row(
+                "Segment handoff",
+                pick_list(
+                    STREAM_SEGMENTS.as_slice(),
+                    Some(segment_label(self.config.stream_segment_seconds)),
+                    Message::StreamSegment
+                )
+                .style(pill_pick(scheme)),
+                scheme,
+            ),
+            text("Word-by-word mode starts a fresh head after this long without a pause. The transcribed words stay in the document; this only bounds the recognizer's context. Shorter is safer, longer keeps more context.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
             settings_divider(scheme),
             section("Recognition", scheme),
             settings_row(
@@ -646,6 +667,13 @@ fn stream_chunk_label(seconds: f32) -> &'static str {
         .into_iter()
         .find(|label| label.trim_end_matches(" s").parse::<f32>() == Ok(seconds))
         .unwrap_or("3.0 s")
+}
+
+fn segment_label(seconds: f32) -> &'static str {
+    STREAM_SEGMENTS
+        .into_iter()
+        .find(|label| label.trim_end_matches(" s").parse::<f32>() == Ok(seconds))
+        .unwrap_or("8 s")
 }
 
 fn load_entries(config: &Config) -> Vec<history::Entry> {
