@@ -90,10 +90,11 @@ cd hippo-dictate-0.2.0-linux-x64
 hippo-dictate model download        # 640 MB, resumable, checksummed
 ```
 
-`install.sh` puts the three binaries and the sherpa runtime in
+`install.sh` puts the four binaries and the sherpa runtime in
 `~/.local/libexec/hippo-dictate`, with symlinks in `~/.local/bin`, the hicolor icons
 under `~/.local/share/icons` and a launcher for the settings window in
-`~/.local/share/applications`. The library lives beside the binaries because the
+`~/.local/share/applications`, with its `Exec=` written as an absolute path
+because a display-manager session does not have `~/.local/bin` on `PATH`. The library lives beside the binaries because the
 daemon looks for it next to itself before anywhere else.
 
 ```bash

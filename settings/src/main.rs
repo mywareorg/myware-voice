@@ -16,8 +16,9 @@ use hippo_ui::tokens::{self, AppTheme, Scheme};
 use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{font, Element, Font, Length, Task};
 use std::sync::OnceLock;
-#[cfg(windows)]
 use std::time::Duration;
+
+mod instance;
 
 const SYSTEM_DEFAULT: &str = "System default";
 const CHUNKS: [&str; 4] = ["10 s", "15 s", "20 s", "30 s"];
@@ -41,9 +42,14 @@ fn main() -> iced::Result {
 }
 
 fn run() -> iced::Result {
-    // The tray icon launches this executable on every click. Focus the window
-    // that is already open instead of stacking another one; the pane request is
-    // picked up by its subscription.
+    // The tray icon and the launcher start this executable on every click. The
+    // second one hands its pane to the first and exits; the request reaches the
+    // open window through the file its subscription polls.
+    if !instance::claim(requested_pane().arg()) {
+        return Ok(());
+    }
+    // Windows already had this as a named mutex, and it also needs the window
+    // found and raised, which is what focus_running_window does.
     #[cfg(windows)]
     if focus_running_window() {
         return Ok(());
@@ -51,11 +57,19 @@ fn run() -> iced::Result {
 
     // `window` replaces `window_size`, so the size is carried in the same
     // settings that add the icon.
-    let window = iced::window::Settings {
+    let mut window = iced::window::Settings {
         size: iced::Size::new(700.0, 640.0),
         icon: window_icon(),
         ..iced::window::Settings::default()
     };
+    #[cfg(target_os = "linux")]
+    {
+        // The compositor names the window by this, which is what the sway rule in
+        // the single-instance handshake matches, and what a user's own rule should
+        // match. Left empty, `[app_id=...]` matches nothing and the raise is a
+        // no-op that looks like a bug in the handshake.
+        window.platform_specific.application_id = "hippo-dictate-settings".to_string();
+    }
 
     iced::application("Hippo Dictate", Settings::update, Settings::view)
         .theme(|state: &Settings| state.mode.iced())
@@ -69,6 +83,16 @@ fn run() -> iced::Result {
 enum Pane {
     Settings,
     History,
+}
+
+impl Pane {
+    /// The name the request file and the handshake carry.
+    fn arg(self) -> &'static str {
+        match self {
+            Pane::Settings => "settings",
+            Pane::History => "history",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -87,9 +111,7 @@ enum Message {
     ToggleHistory,
     ToggleTrailing,
     Refresh,
-    /// Only the Windows subscription polls for a pane request; elsewhere the
-    /// subscription is empty and this variant is never built.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// A pane request arrived from another instance.
     PollRequest,
     Copy(usize),
     ClearHistory,
@@ -139,11 +161,7 @@ impl Settings {
         // The tray opens a specific pane; without a window manager there is no
         // way to pass an argument to an iced app, so the choice comes through
         // the environment. A request file covers a window that is already open.
-        let pane = match std::env::var("HIPPO_DICTATE_START_PANE").as_deref() {
-            Ok("history") => Pane::History,
-            _ => Pane::Settings,
-        };
-        let pane = take_requested_pane().unwrap_or(pane);
+        let pane = take_requested_pane().unwrap_or_else(requested_pane);
         let hotkey_error = Chord::parse(&config.hotkey)
             .err()
             .map(|error| error.to_string());
@@ -172,14 +190,10 @@ impl Settings {
     }
 
     fn subscription(_state: &Self) -> iced::Subscription<Message> {
-        #[cfg(windows)]
-        {
-            iced::time::every(Duration::from_millis(400)).map(|_| Message::PollRequest)
-        }
-        #[cfg(not(windows))]
-        {
-            iced::Subscription::none()
-        }
+        // A second instance writes the request file and exits, so the open window
+        // polls for it. Cheap: one `stat` and one read every 400 ms, and only
+        // while a window is open at all.
+        iced::time::every(Duration::from_millis(400)).map(|_| Message::PollRequest)
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -626,6 +640,14 @@ impl Settings {
 }
 
 /// Read and delete the pane the tray asked for, if any.
+/// The pane this process was asked for, from the environment a launcher sets.
+fn requested_pane() -> Pane {
+    match std::env::var("HIPPO_DICTATE_START_PANE").as_deref() {
+        Ok("history") => Pane::History,
+        _ => Pane::Settings,
+    }
+}
+
 fn take_requested_pane() -> Option<Pane> {
     let path = hippo_dictate::dirs::settings_request_file().ok()?;
     let text = std::fs::read_to_string(&path).ok()?;

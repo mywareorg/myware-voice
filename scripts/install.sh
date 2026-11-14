@@ -124,7 +124,13 @@ fi
 
 if desktop="$(source_tree hippo-dictate.desktop)"; then
     mkdir -p "$prefix/share/applications"
-    install -m 644 "$desktop" "$prefix/share/applications/hippo-dictate.desktop"
+    # `Exec=` is made absolute here. A session started by a display manager has a
+    # minimal PATH — sway's is /usr/local/bin:/usr/bin — so a bare
+    # `hippo-dictate-settings` found nothing and the launcher did nothing at all.
+    # The file is per-user already, so baking the path in costs nothing.
+    sed "s|^Exec=.*|Exec=$dest/hippo-dictate-settings|" "$desktop" \
+        >"$prefix/share/applications/hippo-dictate.desktop"
+    chmod 644 "$prefix/share/applications/hippo-dictate.desktop"
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database -q "$prefix/share/applications" || true
     fi
@@ -162,9 +168,10 @@ case ":$PATH:" in
 esac
 
 echo
-echo "bind it in ~/.config/sway/config:"
-echo "  exec hippo-dictate daemon"
-echo "  bindsym --release --no-repeat ctrl+space exec hippo-dictate toggle"
-echo "  bindsym --release --no-repeat ctrl+shift+space exec hippo-dictate stream"
+echo "bind it in ~/.config/sway/config. Absolute paths: sway runs these through"
+echo "\`sh\` with its own PATH, which does not include $prefix/bin."
+echo "  exec $prefix/bin/hippo-dictate daemon"
+echo "  bindsym --release --no-repeat ctrl+space exec $prefix/bin/hippo-dictate toggle"
+echo "  bindsym --release --no-repeat ctrl+shift+space exec $prefix/bin/hippo-dictate stream"
 echo
 echo "then: hippo-dictate doctor"
