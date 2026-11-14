@@ -64,7 +64,7 @@ linux-release:
     - version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
     - stage="dist/hippo-dictate-$version-linux-x64"
     - mkdir -p "$stage" "$stage/systemd"
-    - cp target/release/hippo-dictate target/release/hippo-dictate-daemon target/release/hippo-dictate-settings "$stage/"
+    - cp target/release/hippo-dictate target/release/hippo-dictate-daemon target/release/hippo-dictate-settings target/release/hippo-dictate-overlay "$stage/"
     # sherpa-onnx and onnxruntime stay together: $ORIGIN rpath.
     - cp -R vendor/sherpa/lib "$stage/lib"
     - cp -R packaging/hicolor "$stage/hicolor"

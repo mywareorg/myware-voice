@@ -46,12 +46,13 @@ package() {
     install -d "$libdir/lib" "$pkgdir/usr/bin" "$pkgdir/usr/share/applications"
     install -m 755 target/release/hippo-dictate \
         target/release/hippo-dictate-daemon \
-        target/release/hippo-dictate-settings "$libdir/"
+        target/release/hippo-dictate-settings \
+        target/release/hippo-dictate-overlay "$libdir/"
     # sherpa-onnx and onnxruntime together: the SONAME is resolved through the
     # shared object's own $ORIGIN rpath.
     install -m 644 "$srcdir/sherpa-onnx-v1.13.8-linux-x64-shared/lib/"*.so "$libdir/lib/"
 
-    for binary in hippo-dictate hippo-dictate-daemon hippo-dictate-settings; do
+    for binary in hippo-dictate hippo-dictate-daemon hippo-dictate-settings hippo-dictate-overlay; do
         ln -s "/usr/lib/$pkgname/$binary" "$pkgdir/usr/bin/$binary"
     done
 

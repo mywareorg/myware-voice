@@ -74,7 +74,7 @@ else
     exit 1
 fi
 
-for required in hippo-dictate hippo-dictate-daemon hippo-dictate-settings; do
+for required in hippo-dictate hippo-dictate-daemon hippo-dictate-settings hippo-dictate-overlay; do
     if [ ! -x "$bin_dir/$required" ]; then
         echo "missing $bin_dir/$required; build the whole workspace" >&2
         exit 1
@@ -87,11 +87,12 @@ mkdir -p "$dest/lib" "$prefix/bin"
 install -m 755 "$bin_dir/hippo-dictate" "$dest/hippo-dictate"
 install -m 755 "$bin_dir/hippo-dictate-daemon" "$dest/hippo-dictate-daemon"
 install -m 755 "$bin_dir/hippo-dictate-settings" "$dest/hippo-dictate-settings"
+install -m 755 "$bin_dir/hippo-dictate-overlay" "$dest/hippo-dictate-overlay"
 # Every .so in lib/: sherpa resolves onnxruntime through its own $ORIGIN rpath, so
 # they have to stay together.
 install -m 644 "$lib_dir"/*.so "$dest/lib/"
 
-for binary in hippo-dictate hippo-dictate-daemon hippo-dictate-settings; do
+for binary in hippo-dictate hippo-dictate-daemon hippo-dictate-settings hippo-dictate-overlay; do
     ln -sfn "../libexec/hippo-dictate/$binary" "$prefix/bin/$binary"
 done
 echo "installed to $dest"

@@ -1757,12 +1757,17 @@ dependencies = [
 name = "hippo-dictate-settings"
 version = "0.2.0"
 dependencies = [
+ "anyhow",
  "hippo-dictate",
  "hippo-ui",
  "iced",
  "image 0.25.10",
+ "serde",
+ "serde_json",
+ "smithay-client-toolkit 0.20.0",
  "toml 0.8.23",
  "toml_edit 0.22.27",
+ "wayland-client",
  "windows-sys 0.61.2",
  "winresource",
 ]

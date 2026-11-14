@@ -431,6 +431,9 @@ struct Daemon {
     stopped_at: Option<Instant>,
     /// Set by a spoken "quit hippo" or the equivalent.
     quit_requested: bool,
+    /// The Linux listening popup, while a capture is running.
+    #[cfg(target_os = "linux")]
+    popup: Option<crate::popup::Popup>,
     jobs: Sender<DecodeJob>,
     status: Arc<Mutex<Status>>,
     recorder: Option<Recorder>,
@@ -629,6 +632,11 @@ impl Daemon {
             "recording on {device}{}",
             if streaming { " (streaming)" } else { "" }
         ));
+        // Started after the recorder, so the first frame already has a level.
+        #[cfg(target_os = "linux")]
+        {
+            self.popup = crate::popup::Popup::start();
+        }
         if streaming && self.config.stream_online && !self.tier.is_pro() {
             note("stream_online needs a Pro licence; streaming will use phrase chunks");
         }
@@ -1344,6 +1352,14 @@ impl Daemon {
     }
 
     fn set(&mut self, phase: Phase) {
+        // The popup lives exactly as long as the capture, so every path that
+        // leaves Recording closes it, including a failure.
+        #[cfg(target_os = "linux")]
+        if phase != Phase::Recording {
+            if let Some(popup) = self.popup.take() {
+                popup.stop();
+            }
+        }
         if phase == Phase::Idle {
             self.streaming = false;
             self.online = None;
@@ -1366,6 +1382,35 @@ impl Daemon {
         }
     }
 
+    /// Whether anything is drawing the spectrum right now.
+    fn wants_bands(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            self.popup.is_some()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            true
+        }
+    }
+
+    /// Feed the popup one frame. Cheap enough for the tick, and silent when there
+    /// is nothing to show.
+    #[cfg(target_os = "linux")]
+    fn popup_tick(&mut self) {
+        let Some(popup) = self.popup.as_mut() else {
+            return;
+        };
+        let snapshot = self.status.lock().map(|status| status.clone());
+        match snapshot {
+            Ok(status) if status.phase == Phase::Recording => popup.send(&status),
+            _ => {}
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn popup_tick(&mut self) {}
+
     fn refresh_seconds(&self) {
         if let Ok(mut status) = self.status.lock() {
             if status.phase == Phase::Recording
@@ -1377,8 +1422,9 @@ impl Daemon {
                     .as_ref()
                     .map(|recorder| recorder.level())
                     .unwrap_or(0.0);
-                #[cfg(windows)]
-                {
+                // The spectrum costs a window transform per tick and only the
+                // popup reads it, so it is computed when something is watching.
+                if self.wants_bands() {
                     status.bands = self
                         .recorder
                         .as_ref()
@@ -1640,6 +1686,8 @@ pub fn run(model_dir: PathBuf) -> Result<()> {
         tier: entitlement.tier,
         stopped_at: None,
         quit_requested: false,
+        #[cfg(target_os = "linux")]
+        popup: None,
         jobs: jobs_tx,
         status,
         recorder: None,
@@ -1674,6 +1722,7 @@ pub fn run(model_dir: PathBuf) -> Result<()> {
             Err(RecvTimeoutError::Timeout) => {
                 daemon.reload_config();
                 daemon.refresh_seconds();
+                daemon.popup_tick();
                 daemon.stream_tick();
                 daemon.unload_if_idle();
                 daemon.enforce_max_capture();

@@ -29,6 +29,19 @@ toml = "0.8"
 # hand-edit. Already in the tree (via `toml`), so this adds no download.
 toml_edit = "0.22"
 
+[[bin]]
+name = "hippo-dictate-overlay"
+path = "src/bin/overlay.rs"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The listening popup draws its own layer-shell surface: any ordinary window
+# would take focus, and a focused overlay breaks the paste it exists to show.
+smithay-client-toolkit = { version = "0.20", default-features = false }
+wayland-client = "0.31"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",

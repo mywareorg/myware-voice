@@ -19,14 +19,15 @@ use anyhow::Result;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, Ellipse, EndPaint,
-    FillRect, GetStockObject, InvalidateRect, SelectObject, SetBkMode, SetTextAlign, SetTextColor,
-    SetWindowRgn, TextOutW, CLEARTYPE_QUALITY, DEFAULT_CHARSET, HGDIOBJ, NULL_PEN, PAINTSTRUCT,
+    FillRect, GetMonitorInfoW, GetStockObject, InvalidateRect, MonitorFromWindow, SelectObject,
+    SetBkMode, SetTextAlign, SetTextColor, SetWindowRgn, TextOutW, CLEARTYPE_QUALITY,
+    DEFAULT_CHARSET, HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST, NULL_PEN, PAINTSTRUCT,
     TA_RIGHT, TA_TOP, TRANSPARENT,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, PeekMessageW,
-    PostQuitMessage, RegisterClassW, SetWindowPos, ShowWindow, SystemParametersInfoW,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetForegroundWindow,
+    PeekMessageW, PostQuitMessage, RegisterClassW, SetWindowPos, ShowWindow, SystemParametersInfoW,
     TranslateMessage, HWND_TOPMOST, MSG, PM_REMOVE, SPI_GETWORKAREA, SWP_NOACTIVATE,
     SWP_NOOWNERZORDER, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, WM_DESTROY, WM_ERASEBKGND, WM_PAINT,
     WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
@@ -175,18 +176,34 @@ fn run(status: Arc<Mutex<Status>>) -> Result<()> {
 /// Put the card above the taskbar in the bottom-right corner, where the clock
 /// and notification centre are. Recomputed on every show: the taskbar can move.
 unsafe fn place(window: HWND) {
+    // The work area of the monitor the user is typing on, not the primary one:
+    // the popup is meant to be seen where the transcript is going. The fallback
+    // is the system work area, for a session with no foreground window.
     let mut area: RECT = std::mem::zeroed();
-    let found = SystemParametersInfoW(
-        SPI_GETWORKAREA,
-        0,
-        &mut area as *mut RECT as *mut std::ffi::c_void,
-        0,
-    );
-    if found == 0 {
-        return;
+    let foreground = GetForegroundWindow();
+    let monitor = if foreground.is_null() {
+        std::ptr::null_mut()
+    } else {
+        MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST)
+    };
+    let mut info: MONITORINFO = std::mem::zeroed();
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    if !monitor.is_null() && GetMonitorInfoW(monitor, &mut info) != 0 {
+        area = info.rcWork;
+    } else {
+        let found = SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            &mut area as *mut RECT as *mut std::ffi::c_void,
+            0,
+        );
+        if found == 0 {
+            return;
+        }
     }
+    // Top right, the same corner as the Linux popup.
     let x = (area.right - WIDTH - MARGIN).max(area.left);
-    let y = (area.bottom - HEIGHT - MARGIN).max(area.top);
+    let y = (area.top + MARGIN).max(area.top);
     SetWindowPos(
         window,
         HWND_TOPMOST,

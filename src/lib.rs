@@ -18,6 +18,8 @@ pub mod log;
 pub mod model;
 #[cfg(windows)]
 pub mod overlay;
+#[cfg(target_os = "linux")]
+pub mod popup;
 pub mod sherpa;
 pub mod text;
 pub mod tone;

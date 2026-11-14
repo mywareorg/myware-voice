@@ -18,7 +18,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 debug="$root/target/debug"
 prefix="${PREFIX:-$HOME/.local}"
 
-for name in hippo-dictate hippo-dictate-daemon hippo-dictate-settings; do
+for name in hippo-dictate hippo-dictate-daemon hippo-dictate-settings hippo-dictate-overlay; do
     if [ ! -x "$debug/$name" ]; then
         echo "missing $debug/$name; run 'cargo build --workspace' first" >&2
         exit 1
@@ -26,7 +26,7 @@ for name in hippo-dictate hippo-dictate-daemon hippo-dictate-settings; do
 done
 
 mkdir -p "$prefix/bin"
-for name in hippo-dictate hippo-dictate-daemon hippo-dictate-settings; do
+for name in hippo-dictate hippo-dictate-daemon hippo-dictate-settings hippo-dictate-overlay; do
     ln -sfn "$debug/$name" "$prefix/bin/$name"
 done
 

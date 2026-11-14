@@ -47,7 +47,7 @@ rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/hippo-dictate.service"
 systemctl --user daemon-reload >/dev/null 2>&1 || true
 
 rm -rf "$prefix/libexec/hippo-dictate"
-for binary in hippo-dictate hippo-dictate-daemon hippo-dictate-settings; do
+for binary in hippo-dictate hippo-dictate-daemon hippo-dictate-settings hippo-dictate-overlay; do
     rm -f "$prefix/bin/$binary"
 done
 rm -f "$prefix/share/applications/hippo-dictate.desktop"

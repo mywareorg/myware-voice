@@ -349,6 +349,36 @@ window, so it copies the transcript and tells you: pasting blind is how a
 transcript lands in a chat window instead of the one you were typing in. That is
 the cost of not supporting X11 yet, and it is visible rather than silent.
 
+## Listening popup
+
+While a capture is running the daemon shows a small panel in the top right of the
+focused screen: a status dot and a symmetric meter of what the microphone is
+hearing. Green is listening for a phrase, blue is committing them as you speak.
+
+On Linux it is a `wlr-layer-shell` surface drawn by `hippo-dictate-overlay`, a
+small separate binary the daemon starts when the capture starts and stops when it
+ends. It has to be a layer surface and not a window: `keyboard_interactivity =
+none` is what makes it impossible for the popup to take focus, and focus is the
+one thing this application cannot afford to lose — the paste would land in the
+popup. Naming no output puts it on the compositor's focused one, so it follows the
+monitor you are typing on.
+
+Being a separate process is deliberate: it links a Wayland client and a software
+renderer, and none of that belongs in the daemon's memory while it is idle over a
+lunch break. The daemon writes one JSON line per tick on the child's stdin and
+closes the pipe to say "done", so the popup's lifetime is exactly the capture's.
+
+On Windows the same panel is a GDI popup positioned at the top right of the work
+area of the monitor holding the foreground window.
+
+Nothing about it is load-bearing. A compositor without `wlr-layer-shell`, a
+missing overlay binary, or a pipe that breaks costs the popup and nothing else;
+the tone cue still plays and the transcript still lands.
+
+Known gap: the Linux panel has no label or timer, where the Windows one shows
+"Listening" and elapsed seconds. Drawing text needs a font stack the overlay
+deliberately does not carry.
+
 ## Tray
 
 The daemon publishes a tray icon: on Linux a StatusNotifierItem, which waybar's
