@@ -64,6 +64,8 @@ enum Command {
     Daemon,
     /// Start or stop recording. This is what the keybind runs.
     Toggle,
+    /// Start or stop dictation that pastes phrases while you speak.
+    Stream,
     /// Print the daemon's state.
     Status,
     /// Stop the daemon.
@@ -157,6 +159,14 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Stream => {
+            let reply = daemon::toggle_stream()?;
+            if !reply.ok {
+                anyhow::bail!(reply.error.unwrap_or_else(|| "daemon error".into()));
+            }
+            println!("ok");
+            Ok(())
+        }
         Command::Status => {
             let reply = match daemon::request("status") {
                 Ok(reply) => reply,
@@ -184,6 +194,9 @@ fn main() -> Result<()> {
             }
             if let Some(paste) = reply.paste {
                 println!("paste: {paste}");
+            }
+            if reply.streaming == Some(true) {
+                println!("streaming: on");
             }
             // Revision zero is the file as it was at startup; only a reload is
             // worth saying out loud.

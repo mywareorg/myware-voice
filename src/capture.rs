@@ -225,20 +225,33 @@ impl Recorder {
         (crate::audio::to_mono(&interleaved, channels), rate)
     }
 
-    /// A copy of everything captured so far, reduced to mono, without stopping.
-    ///
-    /// Streaming commits phrases while the device keeps running, so it cannot
-    /// use `finish_mono`. The copy is deliberate: resampling and decoding happen
-    /// on the daemon thread while the audio callback keeps appending.
-    pub fn snapshot_mono(&self) -> (Vec<f32>, u32) {
-        let interleaved = self
-            .buffer
+    /// How many frames the device has produced so far.
+    pub fn frames(&self) -> usize {
+        self.buffer
             .lock()
-            .map(|samples| samples.clone())
-            .unwrap_or_default();
+            .map(|samples| samples.len() / self.channels.max(1))
+            .unwrap_or(0)
+    }
+
+    /// Mono samples from `from` onwards, plus the total frame count.
+    ///
+    /// Streaming polls ten times a second while the user talks, so it reads only
+    /// what is new. Copying the whole capture each tick would copy a five-minute
+    /// session's worth of audio ten times a second by the end of it.
+    ///
+    /// The returned count is in frames, the same unit as `from`, so a caller can
+    /// remember where it got to without knowing the channel count.
+    pub fn mono_since(&self, from: usize) -> (Vec<f32>, u32, usize) {
+        let Ok(buffer) = self.buffer.lock() else {
+            return (Vec::new(), self.rate, 0);
+        };
+        let channels = self.channels.max(1);
+        let frames = buffer.len() / channels;
+        let start = from.min(frames) * channels;
         (
-            crate::audio::to_mono(&interleaved, self.channels),
+            crate::audio::to_mono(&buffer[start..], channels),
             self.rate,
+            frames,
         )
     }
 }

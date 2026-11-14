@@ -6,9 +6,9 @@ goes to the clipboard and is pasted into the window you were typing in.
 Local-only. The audio never leaves the machine; there are no accounts, no
 telemetry, and no network use after the model is installed.
 
-**Status:** works end to end on sway/Wayland. The Windows build compiles and is
-type-checked but has not been run; streaming dictation is reachable from the
-Windows hotkey only, so `stream_*` in the config does nothing on sway yet.
+**Status:** works end to end on sway/Wayland, including streaming dictation
+(`hippo-voice stream`). The Windows build compiles and is type-checked but has
+not been run.
 
 ## What it uses
 
@@ -131,7 +131,14 @@ In `~/.config/sway/config`:
 ```
 exec hippo-voice daemon
 bindsym --release --no-repeat ctrl+space exec hippo-voice toggle
+bindsym --release --no-repeat ctrl+shift+space exec hippo-voice stream
 ```
+
+`stream` is the same capture as `toggle`, except it pastes phrases as you speak
+rather than one transcript at the end: a phrase is committed at a pause near
+`stream_seconds`, and the session stops on the second press. It is a separate
+command rather than a modifier because the compositor owns the binding — there is
+no chord for the daemon to register, which is what the Windows hotkey does.
 
 `--release` and `--no-repeat` matter: without them a held key toggles in a
 storm. Starting the daemon from the sway config also gives it `WAYLAND_DISPLAY`,

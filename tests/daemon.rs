@@ -57,6 +57,17 @@ impl Fixture {
     /// `model` is the canned transcript for a fake recognizer, or `None` to run
     /// against a real model directory, which the caller points at with `extra`.
     fn start(name: &str, config_text: &str, model: Option<&str>, extra: &[(&str, &str)]) -> Self {
+        Self::start_with(name, config_text, model, extra, &tone(0.5))
+    }
+
+    /// As `start`, with the fake microphone replayed from `samples`.
+    fn start_with(
+        name: &str,
+        config_text: &str,
+        model: Option<&str>,
+        extra: &[(&str, &str)],
+        samples: &[f32],
+    ) -> Self {
         let temp = Temp::new(name);
         let runtime = temp.0.join("run");
         let state_home = temp.0.join("state");
@@ -65,12 +76,8 @@ impl Fixture {
         std::fs::create_dir_all(&state_home).unwrap();
         std::fs::write(&config_path, config_text).unwrap();
 
-        // Half a second of tone, which clears the minimum-utterance gate.
         let wav = temp.0.join("speech.wav");
-        let samples: Vec<f32> = (0..8_000)
-            .map(|index| (index as f32 * 0.05).sin() * 0.3)
-            .collect();
-        audio::write_wav(&wav, &samples, audio::SAMPLE_RATE).unwrap();
+        audio::write_wav(&wav, samples, audio::SAMPLE_RATE).unwrap();
 
         // The client in this process resolves the endpoint from these.
         std::env::set_var("XDG_RUNTIME_DIR", &runtime);
@@ -115,6 +122,25 @@ impl Fixture {
     fn write_config(&self, text: &str) {
         std::fs::write(&self.config_path, text).expect("rewrite the config");
     }
+}
+
+/// Tone, which clears the minimum-utterance gate.
+fn tone(seconds: f32) -> Vec<f32> {
+    let count = (audio::SAMPLE_RATE as f32 * seconds) as usize;
+    (0..count)
+        .map(|index| (index as f32 * 0.05).sin() * 0.3)
+        .collect()
+}
+
+/// Tone and then silence: the pause the streaming path waits for before it
+/// commits a phrase, so a phrase lands while the key is still held.
+fn tone_then_silence(seconds: f32, silence: f32) -> Vec<f32> {
+    let mut samples = tone(seconds);
+    samples.resize(
+        samples.len() + (audio::SAMPLE_RATE as f32 * silence) as usize,
+        0.0,
+    );
+    samples
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool, timeout: Duration) -> bool {
@@ -343,4 +369,54 @@ fn a_missing_model_is_reported_at_startup() {
         reported.contains("model download"),
         "the reason does not say what to do about it: {reported}"
     );
+}
+
+#[test]
+fn streaming_commits_a_phrase_while_the_key_is_still_down() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let _fixture = Fixture::start_with(
+        "stream",
+        "paste = \"none\"\ntones = false\nhistory = false\nstream_seconds = 0.5\n",
+        Some("hello from the test"),
+        &[],
+        // Tone, then a pause: the pause is what a commit waits for, so this lands
+        // before the second press.
+        &tone_then_silence(0.4, 0.4),
+    );
+
+    daemon::toggle_stream().expect("stream on");
+    assert!(
+        wait_until(
+            || daemon::request("status").ok().is_some_and(|status| {
+                status.streaming == Some(true) && status.phase.as_deref() == Some("recording")
+            }),
+            Duration::from_secs(5)
+        ),
+        "the daemon never started a streaming capture"
+    );
+
+    assert!(
+        wait_until(
+            || daemon::request("status")
+                .ok()
+                .is_some_and(|status| status.text.is_some()),
+            Duration::from_secs(5)
+        ),
+        "nothing was committed while the key was still down"
+    );
+
+    daemon::toggle_stream().expect("stream off");
+    assert!(
+        wait_until(
+            || daemon::request("status").ok().is_some_and(|status| {
+                status.phase.as_deref() == Some("idle") && status.streaming == Some(false)
+            }),
+            Duration::from_secs(10)
+        ),
+        "the streaming session never ended"
+    );
+
+    let status = daemon::request("status").expect("status");
+    assert_eq!(status.text.as_deref(), Some("hello from the test"));
+    assert_eq!(status.last_error, None);
 }

@@ -198,6 +198,9 @@ pub struct Reply {
     pub config_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    /// Whether the current capture commits phrases while the user speaks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streaming: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -228,7 +231,20 @@ pub fn request(command: &str) -> Result<Reply> {
 
 /// Send `toggle`, starting the daemon first if it is not running.
 pub fn toggle() -> Result<Reply> {
-    match request("toggle") {
+    deliver_command("toggle")
+}
+
+/// Send `toggle-stream`, with the same "start it if it is not there" behaviour.
+///
+/// Without this the streaming keybind would be the only one that does nothing on
+/// a cold login, and the difference between the two chords would look arbitrary.
+pub fn toggle_stream() -> Result<Reply> {
+    deliver_command("toggle-stream")
+}
+
+/// Send one command to the daemon, starting it first when nothing is listening.
+fn deliver_command(command: &str) -> Result<Reply> {
+    match request(command) {
         Ok(reply) => Ok(reply),
         // Only "nothing is listening" starts a daemon. A live daemon that
         // answered badly must not get a competitor.
@@ -237,7 +253,7 @@ pub fn toggle() -> Result<Reply> {
             spawn_daemon()?;
             let deadline = Instant::now() + Duration::from_secs(2);
             loop {
-                match request("toggle") {
+                match request(command) {
                     Ok(reply) => return Ok(reply),
                     Err(error) if Instant::now() < deadline => {
                         let _ = error;
@@ -444,7 +460,7 @@ impl Daemon {
             let committed = self
                 .recorder
                 .as_ref()
-                .map(|recorder| recorder.snapshot_mono().0.len())
+                .map(|recorder| recorder.frames())
                 .unwrap_or(0);
             self.streaming = true;
             self.stream_committed = committed;
@@ -606,38 +622,37 @@ impl Daemon {
             }
             return;
         }
-        let Some((mono, rate)) = self
+        let Some((raw, rate, frames)) = self
             .recorder
             .as_ref()
-            .map(|recorder| recorder.snapshot_mono())
+            .map(|recorder| recorder.mono_since(self.stream_committed))
         else {
             return;
         };
 
-        let elapsed = mono.len() as f32 / rate.max(1) as f32;
+        let elapsed = frames as f32 / rate.max(1) as f32;
         let committed = self.stream_committed as f32 / rate.max(1) as f32;
         let target = self.config.stream_seconds.max(0.5);
         if elapsed - committed < target {
             return;
         }
-        if self.stream_committed >= mono.len() {
+        if self.stream_committed >= frames || raw.is_empty() {
             return;
         }
 
-        let raw = &mono[self.stream_committed..];
-        let Ok(mut chunk) = audio::resample(raw, rate, audio::SAMPLE_RATE) else {
+        let Ok(mut chunk) = audio::resample(&raw, rate, audio::SAMPLE_RATE) else {
             return;
         };
         if chunk.len() as f32 / (audio::SAMPLE_RATE as f32) < 0.25 {
             return;
         }
         let forced = elapsed - committed >= target * 2.5;
-        if !forced && !silent_tail(raw, rate) {
+        if !forced && !silent_tail(&raw, rate) {
             return;
         }
 
         audio::normalize_loudness(&mut chunk);
-        self.stream_committed = mono.len();
+        self.stream_committed = frames;
         self.last_activity = Instant::now();
         if self
             .jobs
@@ -716,23 +731,23 @@ impl Daemon {
 
     /// Feed the online recognizer and paste newly confirmed words.
     fn online_tick(&mut self) -> Result<()> {
-        let Some((mono, rate)) = self
+        let Some((raw, rate, frames)) = self
             .recorder
             .as_ref()
-            .map(|recorder| recorder.snapshot_mono())
+            .map(|recorder| recorder.mono_since(self.online_fed))
         else {
             return Ok(());
         };
-        if self.online_fed >= mono.len() {
+        if self.online_fed >= frames {
             return Ok(());
         }
-        let raw = &mono[self.online_fed..];
         // 50 ms of audio keeps the hypothesis moving without running the
         // feature frontend on every poll.
         if raw.len() < (rate as usize / 20).max(160) {
             return Ok(());
         }
 
+        let started = Instant::now();
         let (hypothesis, endpoint) = {
             let Some(stream) = self.online.as_ref() else {
                 return Ok(());
@@ -740,11 +755,22 @@ impl Daemon {
             // The streaming API takes the device rate and resamples internally,
             // so feeding it raw avoids padding a 16 kHz resampler at every
             // chunk edge.
-            stream.accept(raw, rate)?;
+            stream.accept(&raw, rate)?;
             (stream.text()?, stream.endpoint())
         };
+        // This runs on the event-loop thread, which is also what answers the
+        // keybind. A slow accept delays the next press, so it is measured: this
+        // is the number that decides whether the online decode has to move off
+        // this thread.
+        let accept = started.elapsed();
+        if accept > Duration::from_millis(10) {
+            log::write(&format!(
+                "streaming: accept took {:.1} ms",
+                accept.as_secs_f64() * 1000.0
+            ));
+        }
         let hypothesis = online_case(&hypothesis);
-        self.online_fed = mono.len();
+        self.online_fed = frames;
 
         let since_handoff =
             (self.online_fed - self.online_segment_start) as f32 / rate.max(1) as f32;
@@ -752,7 +778,7 @@ impl Daemon {
         // Prefer to hand off at a pause, but never let one head grow past 1.5x
         // the target when a monologue has no pause at all.
         let handoff =
-            since_handoff >= target && (silent_tail(&mono, rate) || since_handoff >= target * 1.5);
+            since_handoff >= target && (silent_tail(&raw, rate) || since_handoff >= target * 1.5);
 
         if endpoint || handoff {
             if handoff && !endpoint {
@@ -913,6 +939,12 @@ impl Daemon {
         self.stream_text.push_str(text);
         self.stream_text.push(' ');
 
+        // Recorded before the delivery branch, so a fake-delivery test sees the
+        // same status a real one would report.
+        if let Ok(mut status) = self.status.lock() {
+            status.last_text = Some(text.to_string());
+        }
+
         if self.fake_delivery {
             log::write("streamed (fake delivery)");
             return Ok(());
@@ -928,9 +960,6 @@ impl Daemon {
             Err(error) => return Err(error).context("stream paste"),
         }
         self.last_activity = Instant::now();
-        if let Ok(mut status) = self.status.lock() {
-            status.last_text = Some(text.to_string());
-        }
         log::write(&format!("streamed {} chars", text.chars().count()));
         Ok(())
     }
@@ -1495,6 +1524,29 @@ fn serve(
                 config_revision: None,
                 config_error: None,
                 last_error: None,
+                streaming: None,
+                error: None,
+            }
+        }
+        // Streaming is reachable on Linux only through here: the compositor owns
+        // the keybind, so there is no registered chord to start it the way the
+        // Windows hotkey does.
+        "toggle-stream" => {
+            let _ = events.send(Event::ToggleStream);
+            Reply {
+                ok: true,
+                app: Some(APP.to_string()),
+                protocol: Some(PROTOCOL),
+                phase: None,
+                seconds: None,
+                device: None,
+                text: None,
+                hotkey: None,
+                paste: None,
+                config_revision: None,
+                config_error: None,
+                last_error: None,
+                streaming: None,
                 error: None,
             }
         }
@@ -1513,6 +1565,7 @@ fn serve(
                 config_revision: None,
                 config_error: None,
                 last_error: None,
+                streaming: None,
                 error: None,
             }
         }
@@ -1531,6 +1584,7 @@ fn serve(
                 config_revision: Some(snapshot.config_revision),
                 config_error: snapshot.config_error,
                 last_error: snapshot.last_error,
+                streaming: Some(snapshot.streaming),
                 error: None,
             }
         }
@@ -1547,6 +1601,7 @@ fn serve(
             config_revision: None,
             config_error: None,
             last_error: None,
+            streaming: None,
             error: Some(format!("unknown command {other:?}")),
         },
     };

@@ -606,6 +606,10 @@ mod tests {
     /// Sizes measured from the pinned header with `cc -I include`. If these
     /// change, the vendored library and these bindings are no longer the same
     /// ABI and every decode would be undefined behaviour.
+    ///
+    /// The online structs matter as much as the offline ones: streaming is the
+    /// path with the least real-world exercise, so a layout mismatch there would
+    /// be found by a user rather than by this test.
     #[test]
     fn the_bindings_match_the_pinned_abi() {
         assert_eq!(size_of::<SherpaOnnxFeatureConfig>(), 8);
@@ -613,6 +617,12 @@ mod tests {
         assert_eq!(size_of::<SherpaOnnxOfflineModelConfig>(), 504);
         assert_eq!(size_of::<SherpaOnnxOfflineRecognizerConfig>(), 608);
         assert_eq!(size_of::<SherpaOnnxOfflineRecognizerResult>(), 128);
+        assert_eq!(size_of::<SherpaOnnxOnlineTransducerModelConfig>(), 24);
+        assert_eq!(size_of::<SherpaOnnxOnlineParaformerModelConfig>(), 16);
+        assert_eq!(size_of::<SherpaOnnxOnlineZipformer2CtcModelConfig>(), 8);
+        assert_eq!(size_of::<SherpaOnnxOnlineModelConfig>(), 136);
+        assert_eq!(size_of::<SherpaOnnxOnlineRecognizerConfig>(), 272);
+        assert_eq!(size_of::<SherpaOnnxOnlineRecognizerResult>(), 48);
     }
 
     /// Needs the runtime and the model on disk; run it by hand.
