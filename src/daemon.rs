@@ -93,10 +93,16 @@ pub struct Status {
     /// RMS of the live capture, for the listening popup. Zero when idle.
     #[serde(default)]
     pub level: f32,
+    /// Normalised frequency-band magnitudes for the popup's meter.
+    #[serde(default)]
+    pub bands: Vec<f32>,
     /// Whether the current capture commits phrases while the user speaks.
     #[serde(default)]
     pub streaming: bool,
 }
+
+/// Columns in the popup's frequency meter.
+pub const SPECTRUM_BANDS: usize = 44;
 
 impl Default for Status {
     fn default() -> Self {
@@ -108,6 +114,7 @@ impl Default for Status {
             last_text: None,
             hotkey: None,
             level: 0.0,
+            bands: Vec::new(),
             streaming: false,
         }
     }
@@ -802,6 +809,7 @@ impl Daemon {
                 0.0
             };
             status.level = 0.0;
+            status.bands.clear();
             status.streaming = self.streaming;
         }
     }
@@ -817,6 +825,14 @@ impl Daemon {
                     .as_ref()
                     .map(|recorder| recorder.level())
                     .unwrap_or(0.0);
+                #[cfg(windows)]
+                {
+                    status.bands = self
+                        .recorder
+                        .as_ref()
+                        .map(|recorder| recorder.bands(SPECTRUM_BANDS))
+                        .unwrap_or_default();
+                }
             }
         }
     }

@@ -119,6 +119,70 @@ impl Recorder {
         self.dropped.lock().ok().and_then(|slot| slot.clone())
     }
 
+    /// Normalised magnitude for each logarithmically spaced frequency band.
+    ///
+    /// A 1024-sample Hann-windowed DFT at each band centre is enough for a
+    /// 10 Hz meter and costs far less than pulling in an FFT crate for 44
+    /// columns. The result is in 0..1 with a -60 dB floor, which is what the
+    /// overlay draws; smoothing belongs to the display so a new capture starts
+    /// from zero.
+    pub fn bands(&self, count: usize) -> Vec<f32> {
+        let Ok(samples) = self.buffer.lock() else {
+            return Vec::new();
+        };
+        let channels = self.channels.max(1);
+        let frames = samples.len() / channels;
+        let window = frames.min(1024);
+        if count == 0 || window < 64 {
+            return Vec::new();
+        }
+
+        // Average the channels down to one waveform, same as the recognizer's
+        // view, but keep only the most recent window.
+        let from = (frames - window) * channels;
+        let mono: Vec<f32> = (0..window)
+            .map(|index| {
+                let base = from + index * channels;
+                samples[base..base + channels].iter().sum::<f32>() / channels as f32
+            })
+            .collect();
+        let hann: Vec<f32> = (0..window)
+            .map(|index| {
+                0.5 - 0.5 * (2.0 * std::f32::consts::PI * index as f32 / (window - 1) as f32).cos()
+            })
+            .collect();
+
+        let rate = self.rate.max(1) as f32;
+        let low = 100.0f32.min(rate * 0.1);
+        let high = (rate * 0.5).min(8000.0).max(low * 2.0);
+        let norm = window as f32 * 0.25;
+
+        (0..count)
+            .map(|band| {
+                let position = band as f32 / (count.max(2) - 1) as f32;
+                let frequency = low * (high / low).powf(position);
+                let omega = 2.0 * std::f32::consts::PI * frequency / rate;
+                let (step_sin, step_cos) = omega.sin_cos();
+                let (mut sin_phase, mut cos_phase) = (0.0f32, 1.0f32);
+                let (mut real, mut imaginary) = (0.0f32, 0.0f32);
+                for (index, sample) in mono.iter().enumerate() {
+                    let weighted = sample * hann[index];
+                    real += weighted * cos_phase;
+                    imaginary += weighted * sin_phase;
+                    // Advance by omega without a trig call per sample. Over
+                    // 1024 steps the drift is far below the display resolution.
+                    let next_sin = sin_phase * step_cos + cos_phase * step_sin;
+                    let next_cos = cos_phase * step_cos - sin_phase * step_sin;
+                    sin_phase = next_sin;
+                    cos_phase = next_cos;
+                }
+                let magnitude = (real * real + imaginary * imaginary).sqrt() / norm;
+                let db = 20.0 * magnitude.max(1e-6).log10();
+                ((db + 60.0) / 60.0).clamp(0.0, 1.0)
+            })
+            .collect()
+    }
+
     /// RMS of the most recent ~2048 frames, for the listening popup.
     ///
     /// Deliberately cheap: the buffer is already there, and the display only

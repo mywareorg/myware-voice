@@ -1,15 +1,16 @@
 //! The listening popup.
 //!
 //! A small toast in the bottom-right corner, where Windows notifications live:
-//! a dark card, the word "Listening", a timer and a scrolling level meter. It is
+//! a dark card, the word "Listening", a timer and a frequency meter. It is
 //! created with `WS_EX_NOACTIVATE` and shown with `SW_SHOWNOACTIVATE`; the
 //! daemon must never take focus, or the transcript would paste into the wrong
 //! window.
 //!
-//! The meter is fed by `Status::level`, which the daemon samples from the live
-//! capture every 100 ms. The window itself is plain GDI: one fill, one font, a
-//! row of rectangles. There is no renderer to keep warm for a surface that is
-//! visible for a few seconds at a time.
+//! The meter is fed by `Status::bands`, which the daemon computes from the live
+//! capture every 100 ms as one magnitude per frequency band. Columns stay in
+//! place and move only vertically. The window itself is plain GDI: one fill, one
+//! font, a row of rectangles. There is no renderer to keep warm for a surface
+//! that is visible for a few seconds at a time.
 
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -31,12 +32,12 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
-use crate::daemon::{Phase, Status};
+use crate::daemon::{Phase, Status, SPECTRUM_BANDS};
 
 const WIDTH: i32 = 340;
 const HEIGHT: i32 = 116;
 const MARGIN: i32 = 16;
-const BARS: usize = 44;
+const BARS: usize = SPECTRUM_BANDS;
 const TICK: Duration = Duration::from_millis(100);
 
 /// The level history and timer the window procedure draws. The run loop owns
@@ -122,14 +123,14 @@ fn run(status: Arc<Mutex<Status>>) -> Result<()> {
                 DispatchMessageW(&message);
             }
 
-            let (recording, level, seconds, streaming) = match status.lock() {
+            let (recording, bands, seconds, streaming) = match status.lock() {
                 Ok(status) => (
                     status.phase == Phase::Recording,
-                    status.level,
+                    status.bands.clone(),
                     status.seconds,
                     status.streaming,
                 ),
-                Err(_) => (false, 0.0, 0.0, false),
+                Err(_) => (false, Vec::new(), 0.0, false),
             };
 
             if recording {
@@ -139,8 +140,17 @@ fn run(status: Arc<Mutex<Status>>) -> Result<()> {
                     ShowWindow(window, SW_SHOWNOACTIVATE);
                     shown = true;
                 }
-                levels.rotate_left(1);
-                levels[BARS - 1] = level;
+                // Fixed frequency columns, not a scrolling history: each band
+                // rises immediately and falls gently, so the meter moves
+                // vertically in place and reads as a spectrum.
+                for (index, level) in levels.iter_mut().enumerate() {
+                    let target = bands.get(index).copied().unwrap_or(0.0);
+                    *level = if target > *level {
+                        target
+                    } else {
+                        *level * 0.82
+                    };
+                }
                 if let Ok(mut meter) = meter().lock() {
                     meter.levels = levels;
                     meter.seconds = seconds;
@@ -270,9 +280,9 @@ unsafe fn paint(window: HWND) {
 
     let brush = CreateSolidBrush(rgb(74, 222, 128));
     for (index, level) in levels.iter().enumerate() {
-        // Gain before the square root: speech RMS is small in absolute terms,
-        // so without it the meter barely leaves the baseline.
-        let amplitude = (level * 5.0).clamp(0.0, 1.0).sqrt();
+        // The band values already carry a -60 dB floor and a 60 dB range; a
+        // gentle curve keeps quiet high bands visible without flattening speech.
+        let amplitude = level.clamp(0.0, 1.0).powf(0.8);
         let half = (3.0 + amplitude * reach) as i32;
         let x = left + index as i32 * (bar + gap);
         let column = RECT {
