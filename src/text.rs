@@ -101,6 +101,16 @@ pub fn apply(raw: &str, config: &Config) -> Outcome {
     Outcome::Text(tidy(&text))
 }
 
+/// One line out: newlines become spaces.
+///
+/// A multi-line payload and a terminal are a command injection. "New paragraph"
+/// exists for prose, but the same text pasted into a shell would run whatever
+/// followed the newline, and the paste chord carries no notion of where the line
+/// came from. This is the last place the distinction can be made.
+pub fn flatten(text: &str) -> String {
+    tidy(&text.replace('\n', " "))
+}
+
 /// The part that is safe mid-sentence, for streaming chunks.
 ///
 /// A command or a snippet has to see the whole utterance: applying one to a chunk
@@ -468,6 +478,12 @@ mod tests {
         let mut config = config();
         config.commands = false;
         assert!(matches!(apply("scratch that", &config), Outcome::Text(_)));
+    }
+
+    #[test]
+    fn a_terminal_gets_one_line() {
+        assert_eq!(flatten("one\n\ntwo"), "one two");
+        assert_eq!(flatten("one \n two "), "one two");
     }
 
     #[test]

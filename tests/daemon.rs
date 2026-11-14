@@ -626,3 +626,19 @@ fn a_spoken_quit_stops_the_daemon() {
         "the daemon did not stop on a spoken quit"
     );
 }
+
+#[test]
+fn a_terminal_never_receives_a_newline() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+    let _fixture = Fixture::start(
+        "terminal-flatten",
+        "paste = \"none\"\ntones = false\nhistory = false\n",
+        // The decoder can return a line break: a snippet with one, or a spoken
+        // "new paragraph". Pasted into a shell, that is a command boundary.
+        Some("hello\nworld"),
+        &[("HIPPO_VOICE_FAKE_FOCUS", "foot:1")],
+    );
+
+    let text = deliver_once();
+    assert_eq!(text.as_deref(), Some("hello world"));
+}
