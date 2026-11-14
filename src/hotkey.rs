@@ -39,9 +39,10 @@ pub fn spawn(
     std::thread::Builder::new()
         .name("hotkey".into())
         .spawn(move || unsafe {
-            let modifiers = modifiers(&chord) | MOD_NOREPEAT;
+            let toggle_modifiers = modifiers(&chord) | MOD_NOREPEAT;
             let key = virtual_key(chord.key);
-            let registered = RegisterHotKey(std::ptr::null_mut(), HOTKEY_ID, modifiers, key) != 0;
+            let registered =
+                RegisterHotKey(std::ptr::null_mut(), HOTKEY_ID, toggle_modifiers, key) != 0;
 
             let stream_modifiers = modifiers(&stream) | MOD_NOREPEAT;
             let stream_key = virtual_key(stream.key);

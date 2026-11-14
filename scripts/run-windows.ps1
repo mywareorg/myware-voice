@@ -90,14 +90,17 @@ $root = Split-Path $PSScriptRoot -Parent
 function Add-RunError {
     param(
         [Parameter(Mandatory = $true)][string]$Message,
-        [string]$SourceLog
+        [string[]]$SourceLog
     )
     $target = Join-Path $root 'hippo-voice-error.log'
     Add-Content -LiteralPath $target -Value ''
     Add-Content -LiteralPath $target -Value "=== $Message at $(Get-Date -Format o) ==="
-    if ($SourceLog -and (Test-Path -LiteralPath $SourceLog)) {
-        Get-Content -LiteralPath $SourceLog -Tail 40 |
-            Add-Content -LiteralPath $target
+    foreach ($file in @($SourceLog)) {
+        if ($file -and (Test-Path -LiteralPath $file)) {
+            Add-Content -LiteralPath $target -Value "--- $file ---"
+            Get-Content -LiteralPath $file -Tail 200 |
+                Add-Content -LiteralPath $target
+        }
     }
 }
 
@@ -182,19 +185,41 @@ try {
 
     $cargoArgs = @('run', '--bin', 'hippo-voice-daemon')
     if ($Release) { $cargoArgs = @('run', '--release', '--bin', 'hippo-voice-daemon') }
+    $cargo = (Get-Command cargo).Source
 
     # The daemon launches hippo-voice-settings.exe from its own directory, and
     # `cargo run --bin` builds only the daemon. Without this, left click finds no
     # settings binary and the tray silently does nothing.
+    #
+    # Build output is redirected rather than piped: in Windows PowerShell 5.1 a
+    # native command's stderr becomes an ErrorRecord as soon as it joins the
+    # pipeline, and with $ErrorActionPreference = 'Stop' that aborts the script
+    # before its exit code can be reported.
     Write-Host 'building the workspace'
-    if ($Release) {
-        & cargo build --workspace --release
-    } else {
-        & cargo build --workspace
+    $buildOut = [System.IO.Path]::GetTempFileName()
+    $buildErr = [System.IO.Path]::GetTempFileName()
+    $buildCode = 0
+    try {
+        $buildArgs = @('build', '--workspace')
+        if ($Release) { $buildArgs += '--release' }
+        $build = Start-Process -FilePath $cargo `
+            -ArgumentList $buildArgs `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput $buildOut -RedirectStandardError $buildErr
+        $buildCode = $build.ExitCode
+
+        # Warnings are on stderr; print them whether or not the build failed.
+        Get-Content -LiteralPath $buildErr | ForEach-Object { Write-Host $_ }
+        if ($buildCode -ne 0) {
+            Get-Content -LiteralPath $buildOut -Tail 200 |
+                ForEach-Object { Write-Host $_ }
+            Write-Warning "cargo build exited with code $buildCode"
+            Add-RunError "cargo build exited with code $buildCode" @($buildOut, $buildErr)
+        }
+    } finally {
+        Remove-Item -LiteralPath $buildOut, $buildErr -Force -ErrorAction SilentlyContinue
     }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "cargo build exited with code $LASTEXITCODE"
-        Add-RunError "cargo build exited with code $LASTEXITCODE"
+    if ($buildCode -ne 0) {
         return
     }
 
@@ -211,6 +236,10 @@ try {
         }
         Add-RunError "cargo run exited with code $LASTEXITCODE" $log
     }
+} catch {
+    $reason = $_.Exception.Message
+    Write-Warning "run-windows.ps1 failed: $reason"
+    Add-RunError "run-windows.ps1 failed: $reason"
 } finally {
     Pop-Location
 }
