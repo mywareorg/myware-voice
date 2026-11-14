@@ -681,6 +681,7 @@ impl Daemon {
             stream.accept(raw, rate)?;
             (stream.text()?, stream.endpoint())
         };
+        let hypothesis = online_case(&hypothesis);
         self.online_fed = mono.len();
 
         let since_handoff =
@@ -773,7 +774,7 @@ impl Daemon {
         }
 
         let text = match self.online.as_ref() {
-            Some(stream) => stream.finish()?.trim().to_string(),
+            Some(stream) => online_case(stream.finish()?.trim()),
             None => String::new(),
         };
         if !text.is_empty() {
@@ -1083,6 +1084,44 @@ fn stable_prefix(previous: &str, current: &str) -> String {
         Some(index) => common[..index].trim_end().to_string(),
         None => String::new(),
     }
+}
+
+/// The streaming zipformer is trained on upper-case LibriSpeech transcripts.
+///
+/// Lower-case the hypothesis and capitalise the first word of the segment, plus
+/// the pronoun "I" and its contractions. Proper nouns cannot be recovered without
+/// a true-casing model, and no punctuation is invented: inserting a wrong period
+/// is worse than leaving the phrase open.
+fn online_case(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut capitalize = true;
+    for character in text.chars() {
+        if character.is_alphabetic() {
+            if capitalize {
+                out.extend(character.to_uppercase());
+                capitalize = false;
+            } else {
+                out.extend(character.to_lowercase());
+            }
+        } else {
+            out.push(character);
+            if matches!(character, '.' | '!' | '?' | '\n') {
+                capitalize = true;
+            }
+        }
+    }
+    out.split(' ')
+        .map(|token| {
+            if token == "i" {
+                "I".to_string()
+            } else if token.starts_with("i'") {
+                format!("I{}", &token[1..])
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Whether the end of a capture is quiet enough to cut a phrase there.
@@ -1471,6 +1510,20 @@ fn decoder_loop(
 fn load(model_dir: &Path, threads: i32) -> Result<crate::sherpa::Recognizer> {
     let sherpa = Sherpa::open()?;
     sherpa.recognizer(model_dir, threads)
+}
+
+#[cfg(test)]
+mod case_tests {
+    use super::*;
+
+    #[test]
+    fn the_streaming_model_is_sentence_cased() {
+        assert_eq!(
+            online_case("AFTER EARLY NIGHTFALL I SAID"),
+            "After early nightfall I said"
+        );
+        assert_eq!(online_case("I'M HERE. NEXT ONE"), "I'm here. Next one");
+    }
 }
 
 #[cfg(all(test, unix))]

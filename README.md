@@ -197,9 +197,11 @@ run.** What is wired:
 - **Streaming mode** (`ctrl+shift+space`) records continuously and pastes text
   while you speak. When the streaming zipformer package is installed it is
   word-by-word: a 73 MB online model keeps decoder state, and only words that
-  survive one revision are pasted. A phrase handoff (endpoint, or
-  `stream_segment_seconds` without a pause, 8 s by default) flushes the text and
-  resets the decoder, so a long monologue cannot grow one unbounded head. Without
+  survive one revision are pasted. Its upper-case, unpunctuated output is
+  lower-cased and sentence-cased locally; proper nouns cannot be recovered. A
+  phrase handoff (endpoint, or `stream_segment_seconds` without a pause, 8 s by
+  default) flushes the text and resets the decoder, so a long monologue cannot
+  grow one unbounded head. Without
   that package it falls back to Parakeet phrase chunks committed at pauses near
   `stream_seconds` (3 s, editable in settings). Either way the session stops if
   focus changes, because continuing would paste into the wrong window.
