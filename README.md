@@ -16,9 +16,7 @@ not been run.
   [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). 25 languages, punctuation
   and capitalisation included, no separate punctuation model.
 - **Runtime** — sherpa-onnx 1.13.8, loaded at run time from two shared objects.
-  Nothing is linked at build time. The integration is the `hippo-sherpa` crate,
-  pinned by rev; the model locks, the model directory and the runtime search
-  order stay in this repository, so this app and its sibling share no assets.
+  Nothing is linked at build time.
 - **Audio** — `cpal` for capture, `rubato` to reach the 16 kHz mono the model
   expects.
 
