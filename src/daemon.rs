@@ -395,14 +395,16 @@ impl Daemon {
             self.stream_committed = committed;
             self.stream_focus = inject::focus();
             self.stream_text.clear();
-            if let Err(error) = self.open_online() {
-                note_error(&format!(
-                    "streaming model unavailable; using phrase chunks instead: {error:#}"
-                ));
-            } else {
-                // The audio already in the recorder was not part of this mode.
-                self.online_fed = committed;
-                self.online_segment_start = committed;
+            if self.config.stream_online {
+                if let Err(error) = self.open_online() {
+                    note_error(&format!(
+                        "streaming model unavailable; using phrase chunks instead: {error:#}"
+                    ));
+                } else {
+                    // The audio already in the recorder was not part of this mode.
+                    self.online_fed = committed;
+                    self.online_segment_start = committed;
+                }
             }
             if let Ok(mut status) = self.status.lock() {
                 status.streaming = true;
@@ -441,7 +443,7 @@ impl Daemon {
             "recording on {device}{}",
             if streaming { " (streaming)" } else { "" }
         ));
-        if streaming {
+        if streaming && self.config.stream_online {
             // The capture is already running, so a cold model load overlaps the
             // first words instead of delaying the toast or the microphone.
             if let Err(error) = self.open_online() {

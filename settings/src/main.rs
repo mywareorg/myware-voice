@@ -78,6 +78,7 @@ enum Message {
     StreamHotkey(String),
     StreamChunk(&'static str),
     StreamSegment(&'static str),
+    ToggleStreamOnline,
     Theme(AppTheme),
     Chunk(&'static str),
     ToggleTones,
@@ -219,6 +220,9 @@ impl Settings {
                     .trim_end_matches(" s")
                     .parse()
                     .unwrap_or(self.config.stream_segment_seconds);
+            }
+            Message::ToggleStreamOnline => {
+                self.config.stream_online = !self.config.stream_online;
             }
             Message::Theme(mode) => self.mode = mode,
             Message::Chunk(label) => {
@@ -436,7 +440,7 @@ impl Settings {
                 .style(pill_pick(scheme)),
                 scheme,
             ),
-            text("Fallback phrase length when the word-by-word model is not installed. Shorter chunks appear sooner but cut words more often.")
+            text("Fallback phrase length when the Pro word-by-word engine is off or unavailable. Shorter chunks appear sooner but cut words more often.")
                 .size(tokens::TEXT_XS)
                 .color(scheme.muted),
             settings_row(
@@ -452,6 +456,14 @@ impl Settings {
             text("Word-by-word mode starts a fresh head after this long without a pause. The transcribed words stay in the document; this only bounds the recognizer's context. Shorter is safer, longer keeps more context.")
                 .size(tokens::TEXT_XS)
                 .color(scheme.muted),
+            switch_row(
+                "Word-by-word model",
+                "Pro: use the optional 73 MB streaming zipformer for streaming mode. Off keeps everything on Parakeet, which is more accurate and multilingual.",
+                self.config.stream_online,
+                true,
+                Message::ToggleStreamOnline,
+                scheme,
+            ),
             settings_divider(scheme),
             section("Recognition", scheme),
             settings_row(

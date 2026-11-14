@@ -86,10 +86,16 @@ pub struct Config {
     /// The chord that starts and stops streaming dictation on Windows.
     pub stream_hotkey: String,
     /// Target seconds per fallback phrase when the online streaming model is
-    /// not installed. Streaming waits for a pause near this length before
+    /// not in use. Streaming waits for a pause near this length before
     /// committing, so a word is not cut in two. The word-by-word model ignores
     /// it.
     pub stream_seconds: f32,
+    /// Opt in to the small streaming zipformer for streaming dictation.
+    ///
+    /// Off by default: Parakeet is the accurate, multilingual model, and phrase
+    /// chunking keeps streaming entirely on it. On, streaming uses the online
+    /// model when its package is installed and falls back to chunks otherwise.
+    pub stream_online: bool,
     /// Force a streaming phrase handoff after this many seconds even when the
     /// speaker never pauses. The online encoder's context is unbounded on paper
     /// but grows without limit in practice, and a monologue with no endpoint
@@ -116,6 +122,7 @@ impl Default for Config {
             stream_hotkey: "ctrl+shift+space".to_string(),
             stream_seconds: 3.0,
             stream_segment_seconds: 8.0,
+            stream_online: false,
             history: false,
             history_days: 30,
         }
