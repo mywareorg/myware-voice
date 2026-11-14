@@ -28,6 +28,10 @@ path = "src/bin/daemon.rs"
 
 [dependencies]
 anyhow = "1"
+# The shared sherpa-onnx integration: runtime loader, model packages, audio
+# preparation. Pinned to a rev, never a branch: nothing changes underneath a
+# shipping build.
+hippo-sherpa = { git = "https://gitlab.com/librewarelive/hippo-sherpa", rev = "bee5bb516d967c5a15a5f00e3e7a56fd298a2471" }
 clap = { version = "4", features = ["derive"] }
 cpal = "0.16"
 # Licence verification, offline: the public key is baked in at build time and no
@@ -36,12 +40,8 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 hex = "0.4"
 # Only for `licence keygen`, so issuing one does not need a second toolchain.
 rand_core = { version = "0.6", features = ["getrandom"] }
-hound = "3.5"
-libloading = "0.8"
-rubato = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
 toml = "0.8"
 
 [target.'cfg(windows)'.dependencies]

@@ -13,7 +13,7 @@ use hippo_voice::inject;
 use hippo_voice::licence::{self, Tier};
 use hippo_voice::log;
 use hippo_voice::model;
-use hippo_voice::sherpa::Sherpa;
+use hippo_voice::sherpa;
 use hippo_voice::text::{self, Outcome};
 
 #[derive(Parser)]
@@ -376,7 +376,7 @@ fn model_dir() -> Result<PathBuf> {
 fn doctor() -> Result<()> {
     println!("hippo-voice {}", env!("CARGO_PKG_VERSION"));
 
-    match Sherpa::open() {
+    match sherpa::open() {
         Ok(sherpa) => {
             println!("sherpa-onnx   {}", sherpa.version());
             println!("  library     {}", sherpa.path().display());
@@ -613,7 +613,7 @@ fn transcribe(path: &Path, json: bool, threads: i32, repeat: usize) -> Result<()
     let (samples, gain) = audio::prepare(path)?;
     let prepared = started.elapsed();
 
-    let sherpa = Sherpa::open()?;
+    let sherpa = sherpa::open()?;
     let load_at = Instant::now();
     let recognizer = sherpa.recognizer(&dir, threads)?;
     let loaded = load_at.elapsed();

@@ -1712,6 +1712,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
+name = "hippo-sherpa"
+version = "0.1.0"
+source = "git+https://gitlab.com/librewarelive/hippo-sherpa?rev=bee5bb516d967c5a15a5f00e3e7a56fd298a2471#bee5bb516d967c5a15a5f00e3e7a56fd298a2471"
+dependencies = [
+ "anyhow",
+ "hound",
+ "libloading 0.8.9",
+ "rubato",
+ "serde",
+ "sha2",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "hippo-ui"
 version = "0.1.0"
 source = "git+https://gitlab.com/librewarelive/hippo-ui?rev=a20f31b9c51b9ea1894f7500f4751bb9b91b0440#a20f31b9c51b9ea1894f7500f4751bb9b91b0440"
@@ -1731,13 +1745,10 @@ dependencies = [
  "ed25519-dalek",
  "enigo",
  "hex",
- "hound",
- "libloading 0.8.9",
+ "hippo-sherpa",
  "rand_core",
- "rubato",
  "serde",
  "serde_json",
- "sha2",
  "toml 0.8.23",
  "windows-sys 0.61.2",
  "winresource",

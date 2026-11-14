@@ -25,7 +25,7 @@ use crate::config::{Config, Stamp};
 use crate::inject::{self, Focus};
 use crate::licence::{self, Tier};
 use crate::log;
-use crate::sherpa::Sherpa;
+use crate::sherpa;
 use crate::tone::{self, Cue};
 use crate::transport::{self, Listener, Stream};
 
@@ -654,7 +654,7 @@ impl Daemon {
     /// Load the streaming zipformer and open one stream for this session.
     fn open_online(&mut self) -> Result<()> {
         let dir = crate::model::streaming_dir()?;
-        let sherpa = Sherpa::open()?;
+        let sherpa = sherpa::open()?;
         let recognizer = Arc::new(sherpa.online_recognizer(&dir, 4)?);
         self.online = Some(recognizer.stream()?);
         self.online_fed = 0;
@@ -2083,7 +2083,7 @@ fn decoder_loop(
 /// Load the runtime and recognizer, then forget the borrow so the pair can live
 /// in a long-lived variable.
 fn load(model_dir: &Path, threads: i32) -> Result<crate::sherpa::Recognizer> {
-    let sherpa = Sherpa::open()?;
+    let sherpa = sherpa::open()?;
     sherpa.recognizer(model_dir, threads)
 }
 

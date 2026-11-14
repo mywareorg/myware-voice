@@ -3,7 +3,6 @@
 //! The daemon owns the microphone and a warm recognizer; `hippo-voice toggle`
 //! is what the compositor keybind runs. Nothing here opens a window.
 
-pub mod audio;
 pub mod capture;
 pub mod chord;
 pub mod config;
@@ -15,6 +14,9 @@ pub mod hotkey;
 pub mod inject;
 pub mod licence;
 pub mod log;
+/// The audio preparation the models expect, from the shared integration.
+pub use hippo_sherpa::audio;
+
 pub mod model;
 #[cfg(windows)]
 pub mod overlay;
