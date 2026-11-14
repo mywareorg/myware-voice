@@ -105,9 +105,6 @@ pub struct Status {
     /// RMS of the live capture, for the listening popup. Zero when idle.
     #[serde(default)]
     pub level: f32,
-    /// Normalised frequency-band magnitudes for the popup's meter.
-    #[serde(default)]
-    pub bands: Vec<f32>,
     /// Whether the current capture commits phrases while the user speaks.
     #[serde(default)]
     pub streaming: bool,
@@ -158,9 +155,6 @@ pub struct Timings {
     pub total_ms: f32,
 }
 
-/// Columns in the popup's frequency meter.
-pub const SPECTRUM_BANDS: usize = 36;
-
 impl Default for Status {
     fn default() -> Self {
         Self {
@@ -171,7 +165,6 @@ impl Default for Status {
             last_text: None,
             hotkey: None,
             level: 0.0,
-            bands: Vec::new(),
             streaming: false,
             paste: String::new(),
             config_revision: 0,
@@ -1377,21 +1370,7 @@ impl Daemon {
                 0.0
             };
             status.level = 0.0;
-            status.bands.clear();
             status.streaming = self.streaming;
-        }
-    }
-
-    /// Whether anything is drawing the spectrum right now. The Linux popup fills a
-    /// microphone from the level alone, so nothing there reads the bands.
-    fn wants_bands(&self) -> bool {
-        #[cfg(target_os = "linux")]
-        {
-            false
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            true
         }
     }
 
@@ -1423,15 +1402,9 @@ impl Daemon {
                     .as_ref()
                     .map(|recorder| recorder.level())
                     .unwrap_or(0.0);
-                // The spectrum costs a window transform per tick and only the
-                // popup reads it, so it is computed when something is watching.
-                if self.wants_bands() {
-                    status.bands = self
-                        .recorder
-                        .as_ref()
-                        .map(|recorder| recorder.bands(SPECTRUM_BANDS))
-                        .unwrap_or_default();
-                }
+                // The spectrum is not computed any more: both popups fill a glyph
+                // from the level alone, and 36 window transforms a second for
+                // nobody is exactly the kind of work this project measures away.
             }
         }
     }
