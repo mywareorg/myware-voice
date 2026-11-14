@@ -13,12 +13,14 @@
 # Usage:
 #   .\scripts\run-windows.ps1
 #   .\scripts\run-windows.ps1 -WithModel    # download the 640 MB model first
-#   .\scripts\run-windows.ps1 -Release      # run the release profile
+#   .\scripts\run-windows.ps1 -WithStreamingModel
+#   .\scripts\run-windows.ps1 -Force        # stop a running daemon/settings first
 [CmdletBinding()]
 param(
     [switch]$WithModel,
     [switch]$WithStreamingModel,
-    [switch]$Release
+    [switch]$Release,
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -190,15 +192,42 @@ try {
             try {
                 $task = $client.ConnectAsync('127.0.0.1', [int]$port)
                 if ($task.Wait(300) -and $client.Connected) {
-                    Write-Warning "a daemon is already listening on 127.0.0.1:$port."
-                    Write-Warning 'Quit it from its tray icon, or run `hippo-voice quit`, before starting a development build.'
-                    return
+                    if ($Force) {
+                        Write-Host "stopping the daemon on 127.0.0.1:$port"
+                        Get-Process -Name 'hippo-voice-daemon' `
+                            -ErrorAction SilentlyContinue |
+                            Stop-Process -Force
+                        Start-Sleep -Milliseconds 500
+                    } else {
+                        Write-Warning "a daemon is already listening on 127.0.0.1:$port."
+                        Write-Warning 'Quit it from its tray icon, or run `hippo-voice quit`, before starting a development build (or pass -Force).'
+                        return
+                    }
                 }
             } catch {
                 # A stale endpoint is expected after a crash; carry on.
             } finally {
                 $client.Close()
             }
+        }
+    }
+
+    # The settings window is a separate process and can outlive the daemon.
+    # Windows then refuses to replace target\debug\hippo-voice-settings.exe and
+    # cargo reports "failed to remove file" instead of naming the cause.
+    $blocking = @(Get-Process -Name 'hippo-voice-daemon', 'hippo-voice-settings' `
+        -ErrorAction SilentlyContinue)
+    if ($blocking.Count -gt 0) {
+        $list = ($blocking | ForEach-Object { "$($_.ProcessName) ($($_.Id))" }) -join ', '
+        if ($Force) {
+            Write-Host "stopping $list"
+            $blocking | Stop-Process -Force
+            Start-Sleep -Milliseconds 500
+        } else {
+            Write-Warning "cannot rebuild while these are running: $list"
+            Write-Warning 'Quit the daemon from the tray and close Settings, then rerun; or pass -Force.'
+            Add-RunError "build blocked by running process: $list"
+            return
         }
     }
 
