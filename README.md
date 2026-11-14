@@ -106,9 +106,15 @@ Then bind it, in `~/.config/sway/config` — see "Keybind and autostart" for why
 `--release` and `--no-repeat` matter:
 
 ```
-exec hippo-dictate daemon
-bindsym --release --no-repeat ctrl+space exec hippo-dictate toggle
-bindsym --release --no-repeat ctrl+shift+space exec hippo-dictate stream
+# `exec` runs through `sh` with sway's own PATH. On a session started by a
+# display manager that is /usr/local/bin:/usr/bin, which has no ~/.local/bin, so
+# a bare `hippo-dictate` is a "command not found" in the sway log and nothing
+# happens when you press the chord. An absolute path always works.
+set $hippo ~/.local/bin/hippo-dictate
+
+exec $hippo daemon
+bindsym --release --no-repeat ctrl+space exec $hippo toggle
+bindsym --release --no-repeat ctrl+shift+space exec $hippo stream
 ```
 
 `--systemd` writes `~/.config/systemd/user/hippo-dictate.service` with the installed
@@ -276,9 +282,15 @@ which is a different thing from a copy that took no time.
 In `~/.config/sway/config`:
 
 ```
-exec hippo-dictate daemon
-bindsym --release --no-repeat ctrl+space exec hippo-dictate toggle
-bindsym --release --no-repeat ctrl+shift+space exec hippo-dictate stream
+# `exec` runs through `sh` with sway's own PATH. On a session started by a
+# display manager that is /usr/local/bin:/usr/bin, which has no ~/.local/bin, so
+# a bare `hippo-dictate` is a "command not found" in the sway log and nothing
+# happens when you press the chord. An absolute path always works.
+set $hippo ~/.local/bin/hippo-dictate
+
+exec $hippo daemon
+bindsym --release --no-repeat ctrl+space exec $hippo toggle
+bindsym --release --no-repeat ctrl+shift+space exec $hippo stream
 ```
 
 `stream` is the same capture as `toggle`, except it pastes phrases as you speak
@@ -288,7 +300,13 @@ command rather than a modifier because the compositor owns the binding — there
 no chord for the daemon to register, which is what the Windows hotkey does.
 
 `--release` and `--no-repeat` matter: without them a held key toggles in a
-storm. Starting the daemon from the sway config also gives it `WAYLAND_DISPLAY`,
+storm.
+
+The durable fix for the PATH is a session environment file rather than a path in
+every command — `~/.config/environment.d/10-local-bin.conf` containing
+`PATH=${HOME}/.local/bin:${PATH}` — but that only applies to the next session, and
+the absolute path in the bindings works now. The same reason is why a `.desktop`
+entry that says `Exec=hippo-dictate-settings` can do nothing on a minimal session. Starting the daemon from the sway config also gives it `WAYLAND_DISPLAY`,
 `XDG_RUNTIME_DIR` and the session bus, which a `systemd --user` unit does not
 inherit on Wayland.
 
