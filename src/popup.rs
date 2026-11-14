@@ -31,13 +31,12 @@ impl Popup {
         Some(Self { child, stdin })
     }
 
-    /// One tick: a level, the bands behind it, and whether phrases are being
-    /// committed. A closed pipe means the overlay died, which is not worth
-    /// reporting ten times a second.
+    /// One tick: the input level, and whether phrases are being committed. A
+    /// closed pipe means the overlay died, which is not worth reporting ten times
+    /// a second.
     pub fn send(&mut self, status: &crate::daemon::Status) {
         let line = serde_json::json!({
             "level": status.level,
-            "bands": status.bands,
             "streaming": status.streaming,
         });
         let _ = writeln!(self.stdin, "{line}");

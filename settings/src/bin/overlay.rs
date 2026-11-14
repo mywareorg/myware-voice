@@ -29,11 +29,9 @@ use smithay_client_toolkit::{
     delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,
 };
 
-/// Bars in the meter. Matches the Windows overlay and the daemon's band count.
-const BARS: usize = 36;
-/// The panel, in logical pixels.
-const WIDTH: u32 = 236;
-const HEIGHT: u32 = 58;
+/// The panel, in logical pixels: one microphone glyph and nothing else.
+const WIDTH: u32 = 104;
+const HEIGHT: u32 = 86;
 /// Distance from the top and right edges of the output. The top one clears a
 /// status bar: anchors are measured from the output's edge, not from the usable
 /// area, so 18 would sit on top of waybar's widgets.
@@ -45,8 +43,6 @@ const MARGIN_RIGHT: i32 = 18;
 struct Tick {
     #[serde(default)]
     level: f32,
-    #[serde(default)]
-    bands: Vec<f32>,
     #[serde(default)]
     streaming: bool,
 }
@@ -89,6 +85,7 @@ fn main() -> anyhow::Result<()> {
         pool,
         layer,
         tick: Tick::default(),
+        fill: 0.0,
         configured: false,
         exit: false,
     };
@@ -144,6 +141,8 @@ struct App {
     pool: SlotPool,
     layer: LayerSurface,
     tick: Tick,
+    /// Smoothed fill, so the glyph rises at once and falls gently.
+    fill: f32,
     configured: bool,
     exit: bool,
 }
@@ -166,76 +165,32 @@ impl App {
             Err(_) => return,
         };
 
-        paint(canvas, WIDTH, HEIGHT, &self.tick);
+        // A meter that follows the sample exactly flickers; a slow release keeps
+        // the glyph readable while still dropping when the room goes quiet.
+        let target = (self.tick.level * 3.2).clamp(0.0, 1.0).powf(0.7);
+        self.fill = target.max(self.fill * 0.86);
+        paint(canvas, WIDTH, HEIGHT, &self.tick, self.fill);
 
         buffer.attach_to(self.layer.wl_surface()).ok();
         self.layer.commit();
     }
 }
 
-/// Draw the panel: rounded dark background, a status dot, and a symmetric meter.
+/// Draw the panel: a rounded dark background and a microphone that fills with
+/// the input level from the bottom up.
 ///
-/// The buffer is ARGB8888 in native byte order, premultiplied. Only the corner
-/// pixels need alpha, so the rounding is a distance test rather than a mask.
-fn paint(canvas: &mut [u8], width: u32, height: u32, tick: &Tick) {
-    let radius = 10.0f32;
+/// A row of bars was too small a delta to read at a glance — a level meter's job
+/// is to answer "is it hearing me" in peripheral vision, and 36 columns moving by
+/// two pixels does not. A shape that fills does: the eye reads how much of the
+/// glyph is lit, not the position of a bar.
+fn paint(canvas: &mut [u8], width: u32, height: u32, tick: &Tick, fill: f32) {
     let mut canvas = Canvas {
         pixels: canvas,
         width,
         height,
     };
-
-    canvas.rounded_panel(radius);
-    // The dot is the mode: green for spoken-and-pasted-when-you-stop, blue for
-    // streaming, where phrases are committed as you speak. It grows with the
-    // level so it also proves the microphone is being heard — a mode light that
-    // never moves looks like a broken one.
-    let dot = if tick.streaming {
-        (91, 155, 213)
-    } else {
-        (76, 175, 122)
-    };
-    let radius = 4.0 + 3.0 * tick.level.clamp(0.0, 1.0);
-    canvas.circle(18.0, 20.0, radius, dot);
-
-    // A symmetric meter, so it reads as a waveform rather than a level bar: each
-    // column grows above and below the centre line.
-    let gap = 2i32;
-    let bar = ((width as i32 - 36 - gap * (BARS as i32 - 1)) / BARS as i32).max(2);
-    let total = bar * BARS as i32 + gap * (BARS as i32 - 1);
-    let left = (width as i32 - total) / 2;
-    let top = 34;
-    let bottom = height as i32 - 10;
-    let centre = (top + bottom) / 2;
-    let reach = ((bottom - top) / 2 - 2).max(2) as f32;
-
-    for index in 0..BARS {
-        // A gamma curve, because most of a voice's energy sits in the bottom
-        // third of a dB scale: without it the meter reads as a flat line with a
-        // couple of tall columns at the low end.
-        let value = tick
-            .bands
-            .get(index)
-            .copied()
-            .unwrap_or(if index == 0 { tick.level } else { 0.0 })
-            .clamp(0.0, 1.0)
-            .powf(0.65);
-        let half = (value * reach).max(1.0);
-        let x = left + index as i32 * (bar + gap);
-        // Brighter with amplitude, so the meter reads at a glance.
-        let colour = (
-            (60.0 + 120.0 * value) as u8,
-            (130.0 + 90.0 * value) as u8,
-            (200.0 - 30.0 * value) as u8,
-        );
-        canvas.rect(
-            x,
-            (centre as f32 - half) as i32,
-            bar,
-            (half * 2.0) as i32,
-            colour,
-        );
-    }
+    canvas.rounded_panel(12.0);
+    canvas.microphone(tick.streaming, fill.clamp(0.0, 1.0));
 }
 
 /// The pixel buffer, with the two shapes this panel needs.
@@ -244,6 +199,13 @@ struct Canvas<'a> {
     width: u32,
     height: u32,
 }
+
+/// The glyph, in pixels from the panel's top left. A capsule, the cradle it sits
+/// in, and a stem on a base: the shape everyone recognises as a microphone.
+const CAPSULE: (f32, f32, f32, f32) = (52.0, 8.0, 10.0, 34.0); // x, y, half-width, height
+const CRADLE: (f32, f32, f32, f32) = (52.0, 39.0, 15.0, 2.6); // cx, cy, radius, thickness
+const STEM: (f32, f32, f32, f32) = (50.5, 54.0, 3.0, 9.0); // x, y, width, height
+const BASE: (f32, f32, f32, f32) = (42.0, 63.0, 20.0, 3.0); // x, y, width, height
 
 impl Canvas<'_> {
     fn rounded_panel(&mut self, radius: f32) {
@@ -261,11 +223,35 @@ impl Canvas<'_> {
         }
     }
 
-    fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, colour: (u8, u8, u8)) {
-        let (width, height) = (self.width as i32, self.height as i32);
-        for row in y.max(0)..(y + h).min(height) {
-            for column in x.max(0)..(x + w).min(width) {
-                let offset = ((row as u32 * self.width + column as u32) * 4) as usize;
+    /// The glyph. The capsule fills from its bottom to `fill` of its height; the
+    /// cradle, stem and base stay dim so the shape reads at zero.
+    fn microphone(&mut self, streaming: bool, fill: f32) {
+        // Mode, as before: green for ordinary dictation, blue for streaming.
+        let lit = if streaming {
+            (91, 155, 213)
+        } else {
+            (76, 175, 122)
+        };
+        let track = (58, 60, 68);
+        let (_, top, _, height) = CAPSULE;
+        let line = top + height - fill * height;
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let px = x as f32 + 0.5;
+                let py = y as f32 + 0.5;
+                let colour = if in_capsule(px, py) {
+                    if py >= line {
+                        lit
+                    } else {
+                        track
+                    }
+                } else if in_stand(px, py) {
+                    track
+                } else {
+                    continue;
+                };
+                let offset = ((y * self.width + x) * 4) as usize;
                 self.pixels[offset] = colour.2;
                 self.pixels[offset + 1] = colour.1;
                 self.pixels[offset + 2] = colour.0;
@@ -273,25 +259,48 @@ impl Canvas<'_> {
             }
         }
     }
+}
 
-    fn circle(&mut self, cx: f32, cy: f32, radius: f32, colour: (u8, u8, u8)) {
-        let (width, height) = (self.width as i32, self.height as i32);
-        let (x0, x1) = ((cx - radius) as i32, (cx + radius).ceil() as i32);
-        let (y0, y1) = ((cy - radius) as i32, (cy + radius).ceil() as i32);
-        for row in y0.max(0)..y1.min(height) {
-            for column in x0.max(0)..x1.min(width) {
-                let dx = column as f32 + 0.5 - cx;
-                let dy = row as f32 + 0.5 - cy;
-                if dx * dx + dy * dy <= radius * radius {
-                    let offset = ((row as u32 * self.width + column as u32) * 4) as usize;
-                    self.pixels[offset] = colour.2;
-                    self.pixels[offset + 1] = colour.1;
-                    self.pixels[offset + 2] = colour.0;
-                    self.pixels[offset + 3] = 255;
-                }
-            }
+/// Is this point inside the capsule — the part that fills?
+fn in_capsule(x: f32, y: f32) -> bool {
+    let (cx, top, half_w, height) = CAPSULE;
+    let bottom = top + height;
+
+    // The capsule: a stadium, so the ends are round rather than chopped.
+    if y >= top && y <= bottom && (x - cx).abs() <= half_w {
+        let radius = half_w;
+        if y >= top + radius && y <= bottom - radius {
+            return true;
+        }
+        let centre_y = if y < top + radius {
+            top + radius
+        } else {
+            bottom - radius
+        };
+        let dy = y - centre_y;
+        if (x - cx).powi(2) + dy.powi(2) <= radius * radius {
+            return true;
         }
     }
+
+    false
+}
+
+/// The rest of the silhouette, drawn dim: cradle, stem, base.
+fn in_stand(x: f32, y: f32) -> bool {
+    // The cradle: the lower half of a ring around the capsule's lower end.
+    let (arc_x, arc_y, arc_r, thickness) = CRADLE;
+    let distance = ((x - arc_x).powi(2) + (y - arc_y).powi(2)).sqrt();
+    if y >= arc_y && (distance - arc_r).abs() <= thickness / 2.0 {
+        return true;
+    }
+
+    let (sx, sy, sw, sh) = STEM;
+    if x >= sx && x <= sx + sw && y >= sy && y <= sy + sh {
+        return true;
+    }
+    let (bx, by, bw, bh) = BASE;
+    x >= bx && x <= bx + bw && y >= by && y <= by + bh
 }
 
 fn corner_alpha(x: f32, y: f32, width: u32, height: u32, radius: f32) -> u8 {

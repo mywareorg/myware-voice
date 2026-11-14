@@ -18,11 +18,11 @@ use std::time::Duration;
 use anyhow::Result;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, Ellipse, EndPaint,
-    FillRect, GetMonitorInfoW, GetStockObject, InvalidateRect, MonitorFromWindow, SelectObject,
+    BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, EndPaint,
+    FillRect, GetMonitorInfoW, InvalidateRect, MonitorFromWindow, SelectClipRgn, SelectObject,
     SetBkMode, SetTextAlign, SetTextColor, SetWindowRgn, TextOutW, CLEARTYPE_QUALITY,
-    DEFAULT_CHARSET, HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST, NULL_PEN, PAINTSTRUCT,
-    TA_RIGHT, TA_TOP, TRANSPARENT,
+    DEFAULT_CHARSET, HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST, PAINTSTRUCT, TA_RIGHT, TA_TOP,
+    TRANSPARENT,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -33,12 +33,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
-use crate::daemon::{Phase, Status, SPECTRUM_BANDS};
+use crate::daemon::{Phase, Status};
 
 const WIDTH: i32 = 227;
 const HEIGHT: i32 = 116;
 const MARGIN: i32 = 16;
-const BARS: usize = SPECTRUM_BANDS;
 const TICK: Duration = Duration::from_millis(16);
 /// Per-frame easing toward the newest band value. Attack is quicker than decay
 /// so consonants register, but neither snaps: the daemon publishes bands at
@@ -49,7 +48,8 @@ const DECAY: f32 = 0.10;
 /// The level history and timer the window procedure draws. The run loop owns
 /// the writes; `WM_PAINT` only reads a copy under the lock.
 struct Meter {
-    levels: [f32; BARS],
+    /// Smoothed fill, 0..1, for the microphone glyph.
+    fill: f32,
     seconds: f32,
     streaming: bool,
 }
@@ -59,7 +59,7 @@ static METER: OnceLock<Mutex<Meter>> = OnceLock::new();
 fn meter() -> &'static Mutex<Meter> {
     METER.get_or_init(|| {
         Mutex::new(Meter {
-            levels: [0.0; BARS],
+            fill: 0.0,
             seconds: 0.0,
             streaming: false,
         })
@@ -119,7 +119,7 @@ fn run(status: Arc<Mutex<Status>>) -> Result<()> {
             SetWindowRgn(window, region, 1);
         }
 
-        let mut levels = [0.0f32; BARS];
+        let mut fill = 0.0f32;
         let mut shown = false;
         let mut message: MSG = std::mem::zeroed();
 
@@ -129,33 +129,30 @@ fn run(status: Arc<Mutex<Status>>) -> Result<()> {
                 DispatchMessageW(&message);
             }
 
-            let (recording, bands, seconds, streaming) = match status.lock() {
+            let (recording, level, seconds, streaming) = match status.lock() {
                 Ok(status) => (
                     status.phase == Phase::Recording,
-                    status.bands.clone(),
+                    status.level,
                     status.seconds,
                     status.streaming,
                 ),
-                Err(_) => (false, Vec::new(), 0.0, false),
+                Err(_) => (false, 0.0, 0.0, false),
             };
 
             if recording {
                 if !shown {
-                    levels.fill(0.0);
+                    fill = 0.0;
                     place(window);
                     ShowWindow(window, SW_SHOWNOACTIVATE);
                     shown = true;
                 }
-                // Fixed frequency columns, not a scrolling history. Ease each
-                // column toward the newest magnitude every frame instead of
-                // jumping at the daemon's 100 ms publication cadence.
-                for (index, level) in levels.iter_mut().enumerate() {
-                    let target = bands.get(index).copied().unwrap_or(0.0);
-                    let easing = if target > *level { ATTACK } else { DECAY };
-                    *level += (target - *level) * easing;
-                }
+                // Rise at once, fall gently: the same curve as the Linux overlay,
+                // so a syllable lights the glyph and a pause drains it.
+                let target = (level * 3.2).clamp(0.0, 1.0).powf(0.7);
+                let easing = if target > fill { ATTACK } else { DECAY };
+                fill += (target - fill) * easing;
                 if let Ok(mut meter) = meter().lock() {
-                    meter.levels = levels;
+                    meter.fill = fill;
                     meter.seconds = seconds;
                     meter.streaming = streaming;
                 }
@@ -249,9 +246,9 @@ unsafe fn paint(window: HWND) {
     FillRect(dc, &rect, background);
     DeleteObject(background);
 
-    let (levels, seconds, streaming) = match meter().lock() {
-        Ok(meter) => (meter.levels, meter.seconds, meter.streaming),
-        Err(_) => ([0.0; BARS], 0.0, false),
+    let (fill, seconds, streaming) = match meter().lock() {
+        Ok(meter) => (meter.fill, meter.seconds, meter.streaming),
+        Err(_) => (0.0, 0.0, false),
     };
 
     let font = CreateFontW(
@@ -286,45 +283,69 @@ unsafe fn paint(window: HWND) {
     SelectObject(dc, previous);
     DeleteObject(font);
 
-    // A symmetric meter: each column grows above and below the centre line, so
-    // it reads as a waveform rather than a level bar.
-    let left = 18;
-    let right = width - 18;
-    let gap = 2;
-    let bar = (((right - left) - gap * (BARS as i32 - 1)) / BARS as i32).max(2);
-    let total = bar * BARS as i32 + gap * (BARS as i32 - 1);
-    let left = (width - total) / 2;
-    let top = 50;
-    let bottom = rect.bottom - 12;
-    let centre = (top + bottom) / 2;
-    let reach = ((bottom - top) / 2 - 4).max(2) as f32;
+    // The microphone: a capsule that fills from the bottom with the level, the
+    // same shape and the same colour rule as the Linux overlay. The clip region is
+    // what lets a plain FillRect fill only the lower part of a rounded shape.
+    let cx = width / 2;
+    let cap_top = 46;
+    let cap_bottom = rect.bottom - 32;
+    let cap_width = 24;
+    let left = cx - cap_width / 2;
+    let right = cx + cap_width / 2;
+    let (r, g, b) = if streaming {
+        (91, 155, 213)
+    } else {
+        (76, 175, 122)
+    };
 
-    let brush = CreateSolidBrush(rgb(74, 222, 128));
-    for (index, level) in levels.iter().enumerate() {
-        // The band values already carry a -60 dB floor and a 60 dB range. The
-        // sub-linear curve lifts quiet bands (especially the low end) so the
-        // meter uses the taller card instead of hugging the centre line.
-        let amplitude = level.clamp(0.0, 1.0).powf(0.65);
-        let half = (4.0 + amplitude * reach) as i32;
-        let x = left + index as i32 * (bar + gap);
-        let column = RECT {
-            left: x,
-            top: centre - half,
-            right: x + bar,
-            bottom: centre + half,
-        };
-        FillRect(dc, &column, brush);
-    }
-    DeleteObject(brush);
+    let capsule = CreateRoundRectRgn(left, cap_top, right, cap_bottom, cap_width, cap_width);
+    let track = CreateSolidBrush(rgb(58, 60, 68));
+    let lit = CreateSolidBrush(rgb(r, g, b));
+    SelectClipRgn(dc, capsule);
+    let whole = RECT {
+        left,
+        top: cap_top,
+        right,
+        bottom: cap_bottom,
+    };
+    FillRect(dc, &whole, track);
+    let line = cap_bottom - (fill.clamp(0.0, 1.0) * (cap_bottom - cap_top) as f32) as i32;
+    let filled = RECT {
+        left,
+        top: line,
+        right,
+        bottom: cap_bottom,
+    };
+    FillRect(dc, &filled, lit);
+    // A null region means "no clip": the rest of the panel paints normally.
+    SelectClipRgn(dc, std::ptr::null_mut());
+    DeleteObject(capsule);
+    DeleteObject(track);
+    DeleteObject(lit);
 
-    // A green dot before the label, drawn last so the fill cannot cover it.
-    let dot_brush = CreateSolidBrush(rgb(74, 222, 128));
-    let previous_brush = SelectObject(dc, dot_brush);
-    let previous_pen = SelectObject(dc, GetStockObject(NULL_PEN));
-    Ellipse(dc, 18, 17, 26, 25);
-    SelectObject(dc, previous_pen);
-    SelectObject(dc, previous_brush);
-    DeleteObject(dot_brush);
+    // The stand, dim, so the shape reads as a microphone at zero as well.
+    let stand = CreateSolidBrush(rgb(58, 60, 68));
+    FillRect(
+        dc,
+        &RECT {
+            left: cx - 2,
+            top: cap_bottom + 2,
+            right: cx + 2,
+            bottom: cap_bottom + 11,
+        },
+        stand,
+    );
+    FillRect(
+        dc,
+        &RECT {
+            left: cx - 12,
+            top: cap_bottom + 11,
+            right: cx + 12,
+            bottom: cap_bottom + 14,
+        },
+        stand,
+    );
+    DeleteObject(stand);
 
     EndPaint(window, &paint);
 }

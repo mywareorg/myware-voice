@@ -1382,11 +1382,12 @@ impl Daemon {
         }
     }
 
-    /// Whether anything is drawing the spectrum right now.
+    /// Whether anything is drawing the spectrum right now. The Linux popup fills a
+    /// microphone from the level alone, so nothing there reads the bands.
     fn wants_bands(&self) -> bool {
         #[cfg(target_os = "linux")]
         {
-            self.popup.is_some()
+            false
         }
         #[cfg(not(target_os = "linux"))]
         {

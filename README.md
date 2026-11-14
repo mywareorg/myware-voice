@@ -352,13 +352,14 @@ the cost of not supporting X11 yet, and it is visible rather than silent.
 ## Listening popup
 
 While a capture is running the daemon shows a small panel in the top right of the
-focused screen: a status dot and a symmetric meter of what the microphone is
-hearing.
+focused screen: a microphone that **fills from the bottom with your voice**. How
+much of it is lit is the level, with a fast rise and a slow fall, so it reads at a
+glance in peripheral vision — which a row of bars, moving two pixels per column,
+did not.
 
-The dot is the **mode**, not the level: green is ordinary dictation, where the
-transcript is pasted when you stop, and blue is streaming, where phrases are
-committed as you speak. It grows with the input level so it also shows the
-microphone is being heard; a mode light that never moved would look broken.
+Its colour is the **mode**: green is ordinary dictation, where the transcript is
+pasted when you stop, and blue is streaming, where phrases are committed as you
+speak. The cradle, stem and base stay dim so the shape is recognisable at zero.
 
 On Linux it is a `wlr-layer-shell` surface drawn by `hippo-dictate-overlay`, a
 small separate binary the daemon starts when the capture starts and stops when it
@@ -374,7 +375,9 @@ lunch break. The daemon writes one JSON line per tick on the child's stdin and
 closes the pipe to say "done", so the popup's lifetime is exactly the capture's.
 
 On Windows the same panel is a GDI popup positioned at the top right of the work
-area of the monitor holding the foreground window.
+area of the monitor holding the foreground window, drawing the same microphone
+with the same fill, plus the label and elapsed timer that the Linux panel has no
+font stack for.
 
 Nothing about it is load-bearing. A compositor without `wlr-layer-shell`, a
 missing overlay binary, or a pipe that breaks costs the popup and nothing else;
