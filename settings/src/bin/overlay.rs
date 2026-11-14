@@ -34,8 +34,11 @@ const BARS: usize = 36;
 /// The panel, in logical pixels.
 const WIDTH: u32 = 236;
 const HEIGHT: u32 = 58;
-/// Distance from the top and right edges of the output.
-const MARGIN: i32 = 18;
+/// Distance from the top and right edges of the output. The top one clears a
+/// status bar: anchors are measured from the output's edge, not from the usable
+/// area, so 18 would sit on top of waybar's widgets.
+const MARGIN_TOP: i32 = 46;
+const MARGIN_RIGHT: i32 = 18;
 
 /// One tick of the daemon's status, as it arrives on stdin.
 #[derive(Debug, Default, serde::Deserialize)]
@@ -70,7 +73,7 @@ fn main() -> anyhow::Result<()> {
     // where nothing the compositor draws (bars, notifications) usually sits. No
     // output is named, so the compositor puts it on the one with focus.
     layer.set_anchor(Anchor::TOP | Anchor::RIGHT);
-    layer.set_margin(MARGIN, MARGIN, 0, 0);
+    layer.set_margin(MARGIN_TOP, MARGIN_RIGHT, 0, 0);
     layer.set_size(WIDTH, HEIGHT);
     // The whole point: an overlay that cannot take the keyboard.
     layer.set_keyboard_interactivity(KeyboardInteractivity::None);
