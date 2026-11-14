@@ -135,8 +135,23 @@ pub fn cache_dir() -> Result<PathBuf> {
     resolve(Kind::Cache)
 }
 
+/// The variable that names the config file outright, for tests.
+///
+/// Integration tests drive the real binary, so they cannot rely on the XDG
+/// variables alone: a developer's environment would leak into the run. Naming
+/// the file directly is also the only way to move just the config and leave the
+/// log, socket and history where the rest of the suite expects them.
+const CONFIG_OVERRIDE: &str = "HIPPO_VOICE_CONFIG";
+
 pub fn config_file() -> Result<PathBuf> {
-    Ok(config_dir()?.join("config.toml"))
+    config_file_from(&|key| std::env::var_os(key))
+}
+
+fn config_file_from(env: &dyn Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
+    if let Some(path) = env(CONFIG_OVERRIDE) {
+        return Ok(PathBuf::from(path));
+    }
+    Ok(resolve_for(family(), Kind::Config, env)?.join("config.toml"))
 }
 
 pub fn log_file() -> Result<PathBuf> {
@@ -231,6 +246,24 @@ mod tests {
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Runtime, &env).unwrap(),
             PathBuf::from("/home/me/.local/state/hippo-voice")
+        );
+    }
+
+    #[test]
+    fn config_override_names_the_file_itself() {
+        let env = env_of(&[
+            ("HIPPO_VOICE_CONFIG", "/tmp/elsewhere/config.toml"),
+            ("XDG_CONFIG_HOME", "/xdg/config"),
+        ]);
+        assert_eq!(
+            config_file_from(&env).unwrap(),
+            PathBuf::from("/tmp/elsewhere/config.toml")
+        );
+
+        let plain = env_of(&[("XDG_CONFIG_HOME", "/xdg/config")]);
+        assert_eq!(
+            config_file_from(&plain).unwrap(),
+            PathBuf::from("/xdg/config/hippo-voice/config.toml")
         );
     }
 
