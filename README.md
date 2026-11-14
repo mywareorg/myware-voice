@@ -39,6 +39,26 @@ cargo build
 focused window can be read, the licence tier, and which of `wl-copy`, `wtype`,
 `ydotool` and `notify-send` it found.
 
+### Developing with the keybind live
+
+An installed copy and a checkout do not share a binary, so a rebuild changes
+nothing until the keybind stops pointing at the installed one:
+
+```bash
+./scripts/dev-link.sh          # ~/.local/bin -> target/debug
+cargo build --workspace
+hippo-dictate quit             # replace the daemon that is still running
+```
+
+`toggle` spawns a daemon when none is listening, so the next press starts the new
+build — `quit` is the entire restart, and there is no daemon to start by hand.
+`scripts/install.sh` points the same symlinks back at a release install.
+
+Two consequences worth knowing: a rebuild on Linux can replace the binary while
+the old daemon keeps running, so `quit` is what makes the new code take effect
+rather than an error; and on Windows `cargo build` fails while the daemon holds
+the executable, so quit first there.
+
 `transcribe` applies the same text rules before printing, so a file and a
 dictation read alike.
 
