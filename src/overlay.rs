@@ -170,8 +170,9 @@ fn run(status: Arc<Mutex<Status>>) -> Result<()> {
     }
 }
 
-/// Put the card above the taskbar in the bottom-right corner, where the clock
-/// and notification centre are. Recomputed on every show: the taskbar can move.
+/// Put the card in the top right of the work area, the same corner as the Linux
+/// popup. Recomputed on every show: the taskbar can move, and the user can move
+/// between monitors.
 unsafe fn place(window: HWND) {
     // The work area of the monitor the user is typing on, not the primary one:
     // the popup is meant to be seen where the transcript is going. The fallback
