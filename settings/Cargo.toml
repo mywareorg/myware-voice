@@ -15,7 +15,10 @@ path = "src/main.rs"
 # only reason this binary depends on the daemon crate, and it never talks to the
 # running daemon over its socket.
 hippo-voice = { path = ".." }
-hippo-ui = { git = "https://gitlab.com/librewarelive/hippo-ui", branch = "main", features = ["serde"] }
+# Pinned to a commit, not `branch = "main"`: the settings window is a separate
+# binary that no test builds, so a moving branch breaks it silently. Bump the
+# rev deliberately, with the build checked.
+hippo-ui = { git = "https://gitlab.com/librewarelive/hippo-ui", rev = "a20f31b9c51b9ea1894f7500f4751bb9b91b0440", features = ["serde"] }
 iced = { version = "0.13", features = ["tokio", "advanced", "image-without-codecs"] }
 # The window icon and the header mark arrive as PNG; decode them once rather
 # than enabling every codec iced would pull for `image`.
