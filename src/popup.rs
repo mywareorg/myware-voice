@@ -54,7 +54,10 @@ impl Popup {
     }
 }
 
-fn binary() -> Option<std::path::PathBuf> {
+/// The overlay binary: beside this one in an installed tree, on `PATH` for a
+/// checkout. Shared with `doctor` so it reports what the daemon will actually run
+/// rather than what happens to be on `PATH`.
+pub fn binary() -> Option<std::path::PathBuf> {
     let sibling = std::env::current_exe()
         .ok()?
         .parent()?

@@ -13,6 +13,8 @@ use hippo_dictate::inject;
 use hippo_dictate::licence::{self, Tier};
 use hippo_dictate::log;
 use hippo_dictate::model;
+#[cfg(target_os = "linux")]
+use hippo_dictate::popup;
 use hippo_dictate::sherpa::Sherpa;
 use hippo_dictate::text::{self, Outcome};
 
@@ -478,7 +480,7 @@ fn doctor() -> Result<()> {
     #[cfg(target_os = "linux")]
     println!(
         "popup         {}",
-        match inject::find("hippo-dictate-overlay") {
+        match popup::binary() {
             Some(path) => path.display().to_string(),
             None => "not installed (no listening popup; a tone still plays)".to_string(),
         }
