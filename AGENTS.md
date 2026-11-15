@@ -13,6 +13,13 @@
 - Commit and push to `main` without being asked once a change is ready. There is
   no review step to wait for.
 
+## Running
+
+- `scripts/reload-daemon.sh` rebuilds the daemon and restarts the one that is
+  running. Run it after any change to the daemon's code; a change to
+  `config.toml` alone is picked up on the next idle tick, because the daemon
+  reloads it when the stamp changes.
+
 ## This app
 
 A background daemon, not a window. The compositor owns the keybind; the daemon
