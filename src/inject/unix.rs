@@ -131,6 +131,53 @@ pub fn copy(text: &str) -> Result<()> {
     Ok(())
 }
 
+/// What is on the clipboard now, if it is text.
+///
+/// Read before a transcript is written, so it can be put back: dictation happens
+/// in the middle of other work, and the thing you had copied is usually still
+/// wanted. `None` covers both "no clipboard tool" and "not text", which the caller
+/// treats the same way — nothing to restore.
+pub fn read_clipboard() -> Option<String> {
+    if !have("wl-paste") {
+        return None;
+    }
+    let output = Command::new("wl-paste")
+        .arg("--no-newline")
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Put `text` back on the clipboard exactly as it was.
+///
+/// Not `copy`: that trims trailing newlines because a transcript must never end
+/// in one. A restored selection is the user's own bytes and is returned intact.
+pub fn set_clipboard(text: &str) -> Result<()> {
+    let mut child = Command::new("wl-copy")
+        .stdin(Stdio::piped())
+        .spawn()
+        .context("spawn wl-copy")?;
+    {
+        use std::io::Write;
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| anyhow!("wl-copy stdin"))?;
+        stdin
+            .write_all(text.as_bytes())
+            .context("write to wl-copy")?;
+    }
+    let status = child.wait().context("wait for wl-copy")?;
+    if !status.success() {
+        bail!("wl-copy exited with {status}");
+    }
+    Ok(())
+}
+
 /// Send a paste chord. Returns the method used, or `None` when only the
 /// clipboard was updated.
 pub fn paste(method: PasteMethod, focus: Option<&Focus>) -> Result<PasteMethod> {

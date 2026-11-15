@@ -72,6 +72,18 @@ pub struct Replacement {
     pub to: String,
 }
 
+/// What happens to the clipboard after a transcript is pasted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Clipboard {
+    /// Put back whatever was there before the transcript. The default, because
+    /// dictation is something you do in the middle of other work.
+    #[default]
+    Keep,
+    /// Leave the transcript on the clipboard.
+    Replace,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -79,6 +91,8 @@ pub struct Config {
     pub device: Option<String>,
     /// How the transcript is delivered.
     pub paste: PasteMethod,
+    /// Whether the clipboard goes back to what it held before the transcript.
+    pub clipboard: Clipboard,
     /// Split a recording at silences into chunks this long. Parakeet degrades on
     /// long single clips and grows memory, so this is a correctness limit.
     pub chunk_seconds: f32,
@@ -144,6 +158,7 @@ impl Default for Config {
         Self {
             device: None,
             paste: PasteMethod::Auto,
+            clipboard: Clipboard::Keep,
             chunk_seconds: 20.0,
             threads: 4,
             idle_unload_minutes: 30,

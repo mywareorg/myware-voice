@@ -75,6 +75,29 @@ linux-release:
     - cp scripts/install.sh scripts/uninstall.sh README.md LICENSE CONTRIBUTING.md models.lock models-streaming.lock sherpa.lock "$stage/"
     - tar -czf "dist/hippo-dictate-$version-linux-x64.tar.gz" -C dist "hippo-dictate-$version-linux-x64"
     - tar -tzf "dist/hippo-dictate-$version-linux-x64.tar.gz"
+    # Extract it and install it, because a tarball that only lists its contents has
+    # proved nothing. This would have caught a fourth binary the installer did not
+    # know about, or a launcher whose Exec= was not absolute.
+    - |
+      tar -xzf "dist/hippo-dictate-$version-linux-x64.tar.gz" -C /tmp
+      prefix=$(mktemp -d)
+      /tmp/hippo-dictate-$version-linux-x64/install.sh --prefix "$prefix"
+      test -x "$prefix/bin/hippo-dictate"
+      test -x "$prefix/libexec/hippo-dictate/hippo-dictate-overlay"
+      grep -q "^Exec=$prefix/libexec/hippo-dictate/hippo-dictate-settings$" \
+        "$prefix/share/applications/hippo-dictate.desktop"
+      # Sandboxed directories, so the runner's home is untouched and `doctor` reports
+      # the runtime it installed rather than one on the image. The output is
+      # asserted rather than the exit code: a missing model is a normal state on a
+      # fresh machine, and doctor says so without failing.
+      out=$(XDG_RUNTIME_DIR=$(mktemp -d) \
+        XDG_STATE_HOME=$(mktemp -d) \
+        XDG_DATA_HOME=$(mktemp -d) \
+        XDG_CONFIG_HOME=$(mktemp -d) \
+        "$prefix/bin/hippo-dictate" doctor 2>&1 || true)
+      echo "$out"
+      echo "$out" | grep -q "sherpa-onnx"
+      echo "$out" | grep -q "$prefix/libexec/hippo-dictate/lib"
   artifacts:
     name: hippo-dictate-linux-$CI_COMMIT_SHORT_SHA
     paths:

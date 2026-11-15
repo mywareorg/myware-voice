@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::audio;
 use crate::capture::Recorder;
-use crate::config::{Config, Stamp};
+use crate::config::{Clipboard, Config, Stamp};
 use crate::inject::{self, Focus};
 use crate::licence::{self, Tier};
 use crate::log;
@@ -52,8 +52,19 @@ const PROTOCOL: u32 = 1;
 /// disk. Read once at startup; a spawned daemon inherits it.
 /// Skip the clipboard and the paste, so a test does not need `wl-copy` or a
 /// focused window. Delivery itself has its own tests.
+/// `HIPPO_DICTATE_FAKE_DELIVERY=0` is how a test asks for the real delivery path
+/// while still using a fake microphone and model: the shims that stand in for
+/// `wl-copy` are cheaper than a real selection owner.
+fn fake_delivery_from(value: Option<&str>) -> bool {
+    match value {
+        None => false,
+        Some(value) => !value.is_empty() && value != "0",
+    }
+}
+
 fn fake_delivery() -> bool {
-    std::env::var_os("HIPPO_DICTATE_FAKE_DELIVERY").is_some()
+    let value = std::env::var("HIPPO_DICTATE_FAKE_DELIVERY").ok();
+    fake_delivery_from(value.as_deref())
 }
 
 fn fake_model() -> Option<String> {
@@ -427,6 +438,12 @@ struct Daemon {
     /// The Linux listening popup, while a capture is running.
     #[cfg(target_os = "linux")]
     popup: Option<crate::popup::Popup>,
+    /// What the clipboard held when this capture started, if the policy is to put
+    /// it back at the next one.
+    pending_restore: Option<String>,
+    /// What we last wrote to the clipboard, so a restore can tell our text from
+    /// something the user copied since.
+    last_payload: Option<String>,
     jobs: Sender<DecodeJob>,
     status: Arc<Mutex<Status>>,
     recorder: Option<Recorder>,
@@ -607,6 +624,14 @@ impl Daemon {
         self.last_activity = Instant::now();
         self.started = Instant::now();
         self.recorder = Some(recorder);
+        // The clipboard is handled after the microphone is open: a saved selection
+        // is worth a few spawns, but never worth delaying the first syllable.
+        self.restore_clipboard();
+        self.pending_restore = if self.config.clipboard == Clipboard::Keep {
+            inject::read_clipboard()
+        } else {
+            None
+        };
         self.streaming = streaming;
         self.stream_committed = 0;
         self.stream_focus = if streaming { inject::focus() } else { None };
@@ -1074,6 +1099,7 @@ impl Daemon {
         }
 
         inject::copy(&payload)?;
+        self.last_payload = Some(payload.clone());
         match inject::paste(self.config.paste, now.as_ref()) {
             Ok(crate::config::PasteMethod::None) => {
                 inject::notify("Streaming stopped", "No paste tool available");
@@ -1174,6 +1200,7 @@ impl Daemon {
 
         let copy_at = Instant::now();
         inject::copy(&text)?;
+        self.last_payload = Some(text.clone());
         let copy_ms = since(copy_at);
         if self.config.history {
             if let Err(error) = crate::history::append(text.trim_end()) {
@@ -1246,6 +1273,26 @@ impl Daemon {
             status.timings = Some(timings);
         }
         timings
+    }
+
+    /// Put the previous clipboard back, if it is still ours to put back.
+    ///
+    /// Called at the *start* of the next capture rather than after the paste: a
+    /// restore immediately after the chord races the target application's read of
+    /// the selection, and by the next press the user has usually moved on anyway.
+    fn restore_clipboard(&mut self) {
+        let Some(previous) = self.pending_restore.take() else {
+            return;
+        };
+        let delivered = self.last_payload.clone();
+        let current = inject::read_clipboard();
+        if !keep_clipboard(current.as_deref(), delivered.as_deref()) {
+            return;
+        }
+        match inject::set_clipboard(&previous) {
+            Ok(()) => log::write("clipboard restored"),
+            Err(error) => note(&format!("clipboard: could not restore: {error:#}")),
+        }
     }
 
     /// A transcript that landed means the last failure is no longer the last word.
@@ -1436,6 +1483,17 @@ fn focus_changed_message(readable: bool) -> String {
         "Focus changed; paste it yourself".to_string()
     } else {
         "Could not read the focused window; paste it yourself".to_string()
+    }
+}
+
+/// Is the clipboard still holding what we put there?
+///
+/// If the user copied something in the meantime it is theirs, and restoring would
+/// throw it away. Not knowing what is on the clipboard also means not touching it.
+fn keep_clipboard(current: Option<&str>, delivered: Option<&str>) -> bool {
+    match (current, delivered) {
+        (Some(current), Some(delivered)) => current == delivered,
+        _ => false,
     }
 }
 
@@ -1672,6 +1730,8 @@ pub fn run(model_dir: PathBuf) -> Result<()> {
         quit_requested: false,
         #[cfg(target_os = "linux")]
         popup: None,
+        pending_restore: None,
+        last_payload: None,
         jobs: jobs_tx,
         status,
         recorder: None,
@@ -2139,6 +2199,29 @@ mod case_tests {
             "After early nightfall I said"
         );
         assert_eq!(online_case("I'M HERE. NEXT ONE"), "I'm here. Next one");
+    }
+}
+
+#[cfg(test)]
+mod clipboard_tests {
+    use super::*;
+
+    #[test]
+    fn the_clipboard_goes_back_only_while_it_is_still_ours() {
+        assert!(keep_clipboard(Some("hello "), Some("hello ")));
+        // The user copied something between the paste and the next press.
+        assert!(!keep_clipboard(Some("something else"), Some("hello ")));
+        // Nothing read, or nothing delivered: leave it alone.
+        assert!(!keep_clipboard(None, Some("hello ")));
+        assert!(!keep_clipboard(Some("hello "), None));
+    }
+
+    #[test]
+    fn fake_delivery_can_be_turned_off_with_a_zero() {
+        assert!(!fake_delivery_from(None));
+        assert!(!fake_delivery_from(Some("")));
+        assert!(!fake_delivery_from(Some("0")));
+        assert!(fake_delivery_from(Some("1")));
     }
 }
 

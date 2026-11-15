@@ -648,3 +648,74 @@ fn a_terminal_never_receives_a_newline() {
     let text = deliver_once();
     assert_eq!(text.as_deref(), Some("hello world"));
 }
+
+#[test]
+fn the_previous_clipboard_comes_back_at_the_next_press() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+
+    // Shims stand in for the selection: `wl-copy` writes stdin to a file,
+    // `wl-paste` reads it, and `notify-send` is silenced so a test run does not
+    // put notifications on the developer's desktop.
+    // A separate name: `Temp::new` clears the directory it is given, and the
+    // fixture below would wipe these shims.
+    let holder = Temp::new("clipboard-shims");
+    let bin = holder.0.join("bin");
+    let clip = holder.0.join("clipboard");
+    std::fs::create_dir_all(&bin).expect("create the shim directory");
+    std::fs::write(&clip, "my secret").expect("seed the clipboard");
+    for (name, body) in [
+        ("wl-copy", "#!/bin/sh\ncat > \"$CLIP_FILE\"\n"),
+        ("wl-paste", "#!/bin/sh\ncat \"$CLIP_FILE\"\n"),
+        ("notify-send", "#!/bin/sh\nexit 0\n"),
+    ] {
+        let path = bin.join(name);
+        std::fs::write(&path, body).expect("write shim");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&path).expect("stat").permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&path, permissions).expect("chmod");
+        }
+    }
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let _fixture = Fixture::start(
+        "clipboard",
+        "paste = \"none\"\nclipboard = \"keep\"\ntones = false\nhistory = false\n",
+        Some("hello from the test"),
+        &[
+            ("PATH", &path),
+            ("CLIP_FILE", clip.to_str().expect("utf-8")),
+            ("HIPPO_DICTATE_FAKE_FOCUS", "foot:1"),
+            // The real delivery path: this test is about the clipboard, and the
+            // fake one skips it.
+            ("HIPPO_DICTATE_FAKE_DELIVERY", "0"),
+        ],
+    );
+
+    let text = deliver_once();
+    assert_eq!(text.as_deref(), Some("hello from the test"));
+    let after = std::fs::read_to_string(&clip).unwrap_or_default();
+    assert!(
+        after.contains("hello from the test"),
+        "the transcript never reached the clipboard: {after:?}\nlog:\n{}",
+        _fixture.log()
+    );
+
+    // The next press is what puts the old selection back.
+    daemon::toggle().expect("toggle on");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&clip).unwrap_or_default() == "my secret",
+            Duration::from_secs(5)
+        ),
+        "the previous clipboard was not restored: {:?}",
+        std::fs::read_to_string(&clip).unwrap_or_default()
+    );
+    let _ = daemon::request("quit");
+}

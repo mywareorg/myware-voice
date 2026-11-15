@@ -48,6 +48,19 @@ pub fn unavailable() -> Option<String> {
     None
 }
 
+/// What is on the clipboard now, if it is text.
+pub fn read_clipboard() -> Option<String> {
+    arboard::Clipboard::new().ok()?.get_text().ok()
+}
+
+/// Put `text` back exactly as it was.
+pub fn set_clipboard(text: &str) -> Result<()> {
+    arboard::Clipboard::new()
+        .context("open the clipboard")?
+        .set_text(text.to_string())
+        .context("set the clipboard")
+}
+
 /// Put `text` on the clipboard, without a trailing newline.
 pub fn copy(text: &str) -> Result<()> {
     let text = text.trim_end_matches(['\n', '\r']);

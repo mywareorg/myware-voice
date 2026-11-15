@@ -170,6 +170,13 @@ Two keys set how the recognizer runs: `chunk_seconds` (20 s) is the silence-spli
 length, and `threads` (4, clamped to 1..16) is ONNX Runtime's thread count. Both
 are settled with `transcribe --repeat` rather than by feel — see "Measured".
 
+`clipboard` decides what the clipboard holds afterwards: `"keep"` (the default)
+puts back whatever was there before, and `"replace"` leaves the transcript. The
+restore happens at the **start of the next capture**, not straight after the
+paste — restoring immediately races the target application's read of the
+selection — and only if the clipboard still holds our text, so anything you copied
+in between is left alone.
+
 ### Text before it is pasted
 
 A transcript goes through a rules pass between the decoder and the clipboard. No
