@@ -64,6 +64,22 @@ pub fn recent_from(path: &Path, days: u32, now: u64) -> Result<Vec<Entry>> {
         .collect())
 }
 
+/// Entries whose text contains `needle`, case-insensitively.
+///
+/// A substring match rather than a word search: what people remember is a
+/// fragment — a name, an invoice number — and the window is small enough that
+/// scanning it is the point. An empty needle keeps everything.
+pub fn filter(entries: Vec<Entry>, needle: &str) -> Vec<Entry> {
+    let needle = needle.trim().to_lowercase();
+    if needle.is_empty() {
+        return entries;
+    }
+    entries
+        .into_iter()
+        .filter(|entry| entry.text.to_lowercase().contains(&needle))
+        .collect()
+}
+
 /// Drop entries older than `days`.
 pub fn prune(days: u32) -> Result<()> {
     let path = path()?;
@@ -122,6 +138,37 @@ mod tests {
         assert_eq!(entries[0].text, "first line");
         assert_eq!(entries[2].epoch, 3000);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_search_is_case_insensitive_and_keeps_order() {
+        let entries = vec![
+            Entry {
+                epoch: 1,
+                text: "send the Invoice to Ada".to_string(),
+            },
+            Entry {
+                epoch: 2,
+                text: "book a table".to_string(),
+            },
+            Entry {
+                epoch: 3,
+                text: "chase the invoice again".to_string(),
+            },
+        ];
+        let found = filter(entries, "INVOICE");
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].epoch, 1);
+        assert_eq!(found[1].epoch, 3);
+    }
+
+    #[test]
+    fn an_empty_search_keeps_everything() {
+        let entries = vec![Entry {
+            epoch: 1,
+            text: "anything".to_string(),
+        }];
+        assert_eq!(filter(entries, "   ").len(), 1);
     }
 
     #[test]

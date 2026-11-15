@@ -119,6 +119,9 @@ enum Command {
         /// Delete the history file.
         #[arg(long)]
         clear: bool,
+        /// Only entries containing this text, case-insensitively.
+        #[arg(long)]
+        search: Option<String>,
     },
     /// Inspect, verify or fetch the speech model.
     Model {
@@ -175,7 +178,11 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Command::History { limit, clear } => {
+        Command::History {
+            limit,
+            clear,
+            search,
+        } => {
             if clear {
                 history::clear()?;
                 println!("history cleared");
@@ -187,6 +194,14 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             let entries = history::recent(config.history_days)?;
+            let entries = match search {
+                Some(needle) => history::filter(entries, &needle),
+                None => entries,
+            };
+            if entries.is_empty() {
+                println!("no entries match");
+                return Ok(());
+            }
             for entry in entries.iter().rev().take(limit).rev() {
                 println!("{}  {}", log::stamp(entry.epoch), entry.text);
             }

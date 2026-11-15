@@ -75,7 +75,8 @@ does the same on Windows without the CLI.
 `log` prints where the daemon writes and the last lines of it; the file is capped
 at 1 MiB so a resident daemon cannot fill a disk. `history` prints the opt-in
 transcript history — off by default, pruned after `history_days`, and deleted by
-`history --clear`.
+`history --clear`. `history --search <text>` keeps only the entries containing it,
+case-insensitively, which is the same filter the window's history pane has.
 
 Environment overrides: `HIPPO_DICTATE_SHERPA_DIR`, `HIPPO_DICTATE_MODEL_DIR`.
 

@@ -117,6 +117,7 @@ enum Message {
     ToggleCommands,
     Clipboard(Clipboard),
     Preview(String),
+    HistoryFilter(String),
     SnippetTrigger(usize, String),
     SnippetText(usize, String),
     AddSnippet,
@@ -144,6 +145,8 @@ struct Settings {
     error: Option<String>,
     /// A phrase the rules are run on as you type, so the switches are not blind.
     preview: String,
+    /// What the history pane is filtered to.
+    history_filter: String,
     model_state: String,
     hotkey_draft: String,
     hotkey_error: Option<String>,
@@ -211,6 +214,7 @@ impl Settings {
                 copied: None,
                 saved: false,
                 preview: "um, mail sean at sign example dot com".to_string(),
+                history_filter: String::new(),
                 error: config_error,
                 model_state,
             },
@@ -293,6 +297,7 @@ impl Settings {
             Message::ToggleCommands => self.config.commands = !self.config.commands,
             Message::Clipboard(kind) => self.config.clipboard = kind,
             Message::Preview(text) => self.preview = text,
+            Message::HistoryFilter(text) => self.history_filter = text,
             Message::SnippetTrigger(index, trigger) => {
                 if let Some(snippet) = self.config.snippets.get_mut(index) {
                     snippet.trigger = trigger;
@@ -770,6 +775,21 @@ impl Settings {
             .into();
         }
 
+        let needle = self.history_filter.trim().to_lowercase();
+        let visible: Vec<(usize, &hippo_dictate::history::Entry)> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| needle.is_empty() || entry.text.to_lowercase().contains(&needle))
+            .collect();
+
+        let filter: Element<'_, Message> =
+            text_input("search the transcripts", self.history_filter.as_str())
+                .on_input(Message::HistoryFilter)
+                .style(pill_input)
+                .width(Length::Fill)
+                .into();
+
         let mut list = column![].spacing(tokens::SPACE_SM).width(Length::Fill);
         if self.entries.is_empty() {
             list = list.push(
@@ -778,7 +798,14 @@ impl Settings {
                     .color(scheme.muted),
             );
         }
-        for (index, entry) in self.entries.iter().enumerate().rev() {
+        if !self.entries.is_empty() && visible.is_empty() {
+            list = list.push(
+                text("No entry contains that.")
+                    .size(tokens::TEXT_SM)
+                    .color(scheme.muted),
+            );
+        }
+        for (index, entry) in visible.into_iter().rev() {
             let copied = self.copied == Some(index);
             list = list.push(
                 container(
@@ -830,6 +857,7 @@ impl Settings {
             .spacing(tokens::SPACE_SM)
             .align_y(iced::Alignment::Center)
             .width(Length::Fill),
+            filter,
             list,
         ]
         .spacing(tokens::SPACE_MD)
