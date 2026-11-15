@@ -21,6 +21,7 @@
 stages:
   - check
   - build
+  - package
 
 check:
   stage: check
@@ -152,4 +153,28 @@ windows-cross:
     name: hippo-dictate-windows-$CI_COMMIT_SHORT_SHA
     paths:
       - dist/
+    expire_in: 30 days
+
+# Needs a Windows runner: `tags: [windows]`. It is manual because the cross-build
+# above is the only job that can run on the Linux runners this project has, and a
+# Windows job that nothing matches would otherwise sit pending in every pipeline.
+#
+# The package is signed with a self-signed certificate created on the runner, so
+# it installs only where that certificate is trusted. A releasable MSIX needs a
+# real code-signing certificate in a CI variable, which is a purchase decision.
+windows-msix:
+  stage: package
+  tags:
+    - windows
+  when: manual
+  allow_failure: true
+  interruptible: true
+  script:
+    - powershell -ExecutionPolicy Bypass -File .\scripts\package-msix.ps1
+    - Get-ChildItem dist\*.msix, dist\*.msix.sha256 | Select-Object Name, Length
+  artifacts:
+    name: hippo-dictate-msix-$CI_COMMIT_SHORT_SHA
+    paths:
+      - dist/*.msix
+      - dist/*.msix.sha256
     expire_in: 30 days

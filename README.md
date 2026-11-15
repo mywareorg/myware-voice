@@ -542,6 +542,35 @@ deleting the 640 MB model.
 Unsigned executables make SmartScreen say "Windows protected your PC" until you
 choose More info → Run anyway. That is a signing certificate decision, not a bug.
 
+### Signed MSIX, for sideloading
+
+```powershell
+.\scripts\package-msix.ps1            # build, self-sign, pack
+.\scripts\package-msix.ps1 -Install   # and install it
+```
+
+Three pieces, in order: `build-windows.ps1` stages the executables and runtime,
+`make-test-cert.ps1` creates or reuses a self-signed code-signing certificate whose
+subject matches `packaging\identity.json`, and `make-msix.ps1` lays the package
+out, renders `packaging\AppxManifest.xml.template`, indexes the tile assets with
+`makepri`, packs with `makeappx`, unpacks it again to prove nothing was lost, and
+signs it with `signtool`.
+
+The certificate is per-user and does not need elevation: the private half stays in
+`Cert:\CurrentUser\My`, the `.cer` goes into `Cert:\CurrentUser\TrustedPeople`,
+and the package installs with `Add-AppxPackage` on this machine. Anywhere else it
+will not install until that certificate is trusted there, which is what
+"self-signed" means. `-NoCertificate` packs without signing when you only want to
+inspect the contents, and `-SkipBuild` reuses an existing `dist` folder.
+
+The daemon runs at login through the manifest's `windows.startupTask`, because the
+settings window is the app's face and the daemon has no window of its own. The
+`microphone` device capability is declared: a packaged app without it is silently
+given silence rather than an error.
+
+CI has a `windows-msix` job behind `tags: [windows]`, manual, because the runners
+this project has are Linux and the cross-build is all they can do.
+
 Or build the release folder in one command from a checkout:
 
 ```powershell

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Rendered by scripts/make-msix.ps1 from packaging/identity.json. Edit this
+  template, not the generated copy.
+
+  EntryPoint="Windows.FullTrustApplication" with the runFullTrust capability is
+  the desktop bridge for a plain Win32 executable: the process runs at the same
+  integrity level as the loose .exe, so the sherpa DLLs beside it load unchanged.
+
+  Do not add uap10:RuntimeBehavior="win32App". makeappx rejects that value
+  alongside EntryPoint (80080204) and rejects Executable without EntryPoint.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 desktop rescap">
+
+  <Identity
+    Name="{{PackageName}}"
+    Publisher="{{Publisher}}"
+    Version="{{Version}}"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>{{DisplayName}}</DisplayName>
+    <PublisherDisplayName>{{PublisherDisplayName}}</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily
+      Name="Windows.Desktop"
+      MinVersion="10.0.17763.0"
+      MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Applications>
+    <!-- The settings window is the app's face; the daemon has no window of its
+         own and is started at login by the startup task below. -->
+    <Application
+      Id="{{ApplicationId}}"
+      Executable="hippo-dictate-settings.exe"
+      EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="{{DisplayName}}"
+        Description="{{Description}}"
+        BackgroundColor="{{BackgroundColor}}"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+        <uap:SplashScreen
+          Image="Assets\SplashScreen.png"
+          BackgroundColor="{{BackgroundColor}}" />
+      </uap:VisualElements>
+
+      <!-- The daemon is what owns the microphone and the keybind, so a packaged
+           install without this would have nothing listening. Full-trust packaged
+           apps can register a global hotkey, which is how the chord works here. -->
+      <Extensions>
+        <uap5:Extension
+          Category="windows.startupTask"
+          Executable="hippo-dictate-daemon.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask
+            TaskId="HippoDictateDaemon"
+            Enabled="true"
+            DisplayName="{{DisplayName}}" />
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <!-- Recording without this is silently given silence rather than an error. -->
+    <DeviceCapability Name="microphone" />
+  </Capabilities>
+</Package>
