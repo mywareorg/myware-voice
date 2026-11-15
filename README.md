@@ -171,6 +171,12 @@ Two keys set how the recognizer runs: `chunk_seconds` (20 s) is the silence-spli
 length, and `threads` (4, clamped to 1..16) is ONNX Runtime's thread count. Both
 are settled with `transcribe --repeat` rather than by feel — see "Measured".
 
+Every capture logs its length and RMS — `capture 2.0s rms 0.1435` — so a
+transcript that came from near-silence is a measurement rather than a mystery.
+That is the data a silence threshold would be tuned against; on this machine the
+model returns an empty transcript for a room's noise floor, so there is nothing to
+gate yet.
+
 `clipboard` decides what the clipboard holds afterwards: `"keep"` (the default)
 puts back whatever was there before, and `"replace"` leaves the transcript. The
 restore happens at the **start of the next capture**, not straight after the

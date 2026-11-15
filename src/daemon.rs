@@ -723,6 +723,13 @@ impl Daemon {
                 "audio device failed mid-capture ({reason}); delivering {seconds:.1}s"
             ));
         }
+        // What the decoder is about to be given, so a transcript that came from
+        // near-silence is a measurement rather than a mystery.
+        let rms = {
+            let energy: f32 = samples.iter().map(|sample| sample * sample).sum();
+            (energy / samples.len().max(1) as f32).sqrt()
+        };
+        note(&format!("capture {seconds:.1}s rms {rms:.4}"));
         if seconds > self.config.max_seconds {
             self.set(Phase::Idle);
             return Err(anyhow!("recording was longer than the configured maximum"));
