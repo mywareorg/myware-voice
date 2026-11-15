@@ -1,0 +1,204 @@
+
+=== cargo build exited with code 101 at 2026-11-14T16:59:06.3478807-08:00 ===
+--- C:\Users\wuphy\AppData\Local\Temp\tmpCB48.tmp ---
+--- C:\Users\wuphy\AppData\Local\Temp\tmpCB49.tmp ---
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:406:18
+    |
+406 |         _output: wayland_client::protocol::wl_output::WlOutput,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:414:18
+    |
+414 |         _output: wayland_client::protocol::wl_output::WlOutput,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `anyhow` in this scope
+  --> settings\src\bin\overlay.rs:50:14
+   |
+50 | fn main() -> anyhow::Result<()> {
+   |              ^^^^^^ use of unresolved module or unlinked crate `anyhow`
+   |
+   = help: if you wanted to use a crate named `anyhow`, use `cargo add anyhow` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `serde_json` in this scope
+   --> settings\src\bin\overlay.rs:101:31
+    |
+101 |             if let Ok(tick) = serde_json::from_str::<Tick>(&line) {
+    |                               ^^^^^^^^^^ use of unresolved module or unlinked crate `serde_json`
+    |
+    = help: if you wanted to use a crate named `serde_json`, use `cargo add serde_json` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:345:23
+    |
+345 |         _connection: &wayland_client::Connection,
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:346:18
+    |
+346 |         _queue: &wayland_client::QueueHandle<Self>,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:354:23
+    |
+354 |         _connection: &wayland_client::Connection,
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:355:18
+    |
+355 |         _queue: &wayland_client::QueueHandle<Self>,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:363:23
+    |
+363 |         _connection: &wayland_client::Connection,
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:364:18
+    |
+364 |         _queue: &wayland_client::QueueHandle<Self>,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:372:23
+    |
+372 |         _connection: &wayland_client::Connection,
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:373:18
+    |
+373 |         _queue: &wayland_client::QueueHandle<Self>,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:381:23
+    |
+381 |         _connection: &wayland_client::Connection,
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:382:18
+    |
+382 |         _queue: &wayland_client::QueueHandle<Self>,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:396:23
+    |
+396 |         _connection: &wayland_client::Connection,
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:397:18
+    |
+397 |         _queue: &wayland_client::QueueHandle<Self>,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:404:23
+    |
+404 |         _connection: &wayland_client::Connection,
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:405:18
+    |
+405 |         _queue: &wayland_client::QueueHandle<Self>,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:412:23
+    |
+412 |         _connection: &wayland_client::Connection,
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:413:18
+    |
+413 |         _queue: &wayland_client::QueueHandle<Self>,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:428:23
+    |
+428 |         _connection: &wayland_client::Connection,
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:429:18
+    |
+429 |         _queue: &wayland_client::QueueHandle<Self>,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:437:23
+    |
+437 |         _connection: &wayland_client::Connection,
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+error[E0433]: cannot find module or crate `wayland_client` in this scope
+   --> settings\src\bin\overlay.rs:438:18
+    |
+438 |         _queue: &wayland_client::QueueHandle<Self>,
+    |                  ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `wayland_client`
+    |
+    = help: if you wanted to use a crate named `wayland_client`, use `cargo add wayland_client` to add it to your `Cargo.toml`
+
+Some errors have detailed explanations: E0432, E0433.
+For more information about an error, try `rustc --explain E0432`.
+error: could not compile `hippo-dictate-settings` (bin "hippo-dictate-overlay") due to 48 previous errors
+warning: build failed, waiting for other jobs to finish...
+warning: `hippo-dictate-settings` (bin "hippo-dictate-settings") generated 1 warning (run `cargo fix --bin "hippo-dictate-settings" -p hippo-dictate-settings` to apply 1 suggestion)
