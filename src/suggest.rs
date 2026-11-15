@@ -246,10 +246,13 @@ pub fn parse(raw: &str) -> Result<Vec<Proposal>> {
 
 /// The model one suggestion run may use.
 ///
-/// A local server can serve models from `ollama.com`, so "the server is on
-/// loopback" does not mean "the history stays here". This is the check that
-/// makes the difference: the only model a suggestion may use is one the server
-/// reads from this machine's disk.
+/// An explicit name in `ollama_model` is honoured whatever it is: pointing this
+/// at a model served from `ollama.com` is the user's decision to make, and
+/// overriding a line they wrote would be the app deciding for them.
+///
+/// With no name there is no decision to respect, so the choice is drawn only
+/// from what the server reads off this machine's disk. Picking a remote model
+/// there would send a transcript somewhere on the strength of list order.
 ///
 /// Pure over the model list so the policy is testable without a server.
 pub fn choose_model(models: &[ollama::Model], preferred: &str) -> Result<String> {
@@ -259,18 +262,14 @@ pub fn choose_model(models: &[ollama::Model], preferred: &str) -> Result<String>
     }
     if !preferred.is_empty() {
         return match models.iter().find(|model| model.name == preferred) {
-            None => bail!("{preferred} is not installed on the local server"),
-            Some(model) if model.is_remote() => bail!(
-                "{preferred} is served from {} — that would send the history off this machine. Pull a model that is on disk and name that instead.",
-                model.host()
-            ),
             Some(_) => Ok(preferred.to_string()),
+            None => bail!("{preferred} is not installed on the local server"),
         };
     }
     match models.iter().find(|model| !model.is_remote()) {
         Some(model) => Ok(model.name.clone()),
         None => bail!(
-            "every installed model is served from {}; none is on this machine. Run `ollama pull <model>`.",
+            "every installed model is served from {}; none is on this machine. Run `ollama pull <model>`, or set `ollama_model` to name a cloud model deliberately.",
             models[0].host()
         ),
     }
@@ -415,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn a_cloud_model_is_never_chosen() {
+    fn an_explicit_cloud_model_is_honoured_and_an_implicit_one_is_not() {
         let models = [
             ollama::Model {
                 name: "big:70b".to_string(),
@@ -426,13 +425,14 @@ mod tests {
                 remote_host: None,
             },
         ];
-        // Unset: the first model on disk, not the first model listed.
+        // Unset: the first model on disk, not the first model listed. Picking the
+        // cloud one here would be a choice nobody made.
         assert_eq!(choose_model(&models, "").expect("chosen"), "llama3.2:3b");
-        // Named: honoured when it is local, refused when it is not.
+        // Named: honoured either way. Pointing the config at a cloud model is the
+        // user's decision, and the app does not overrule a written line.
         assert_eq!(choose_model(&models, "llama3.2:3b").expect("chosen"), "llama3.2:3b");
-        let error = choose_model(&models, "big:70b").expect_err("refused");
-        assert!(error.to_string().contains("off this machine"), "{error}");
-        // Named but absent is a different error from remote.
+        assert_eq!(choose_model(&models, "big:70b").expect("chosen"), "big:70b");
+        // Named but absent is an error either way.
         let error = choose_model(&models, "nope").expect_err("refused");
         assert!(error.to_string().contains("not installed"), "{error}");
     }
@@ -445,6 +445,8 @@ mod tests {
         }];
         let error = choose_model(&models, "").expect_err("refused");
         assert!(error.to_string().contains("none is on this machine"), "{error}");
+        // The way out is named, and it is the user's to take.
+        assert!(error.to_string().contains("`ollama_model`"), "{error}");
     }
 
     #[test]

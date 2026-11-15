@@ -271,9 +271,11 @@ without a click, and the model is never in the path of a paste.
 Turn on **Keep history** first — the suggestions are drawn from `history.tsv`.
 
 A local server also serves models from `ollama.com`. The base URL being loopback
-says nothing about where the prompt goes, so the suggestion run checks
-`remote_host` in `/api/tags` and refuses any model the server does not read from
-this machine's disk. There is no setting that overrides that.
+says nothing about where the prompt goes, so the client reads `remote_host` from
+`/api/tags`. With `ollama_model` empty, a suggestion run only ever picks a model
+the server reads from this machine's disk; with `ollama_model` set, the named
+model is used whatever it is. Bringing your own model means it is yours to point,
+and the app does not overrule a line you wrote.
 
 - `ollama_url = "http://127.0.0.1:11434"` — the base URL. The client accepts only
   `127.0.0.1`, `localhost` or `::1`; a LAN or cloud host is an error, so there is
@@ -295,9 +297,9 @@ hippo-dictate ollama doctor          # add --json for one object
 `doctor` is the one to run first. It prints the server's version, every installed
 model marked `local` or `CLOUD <host>`, which model a suggestion run would pick
 and why not if it cannot, and one completion's speed from the server's own
-counters — `tok/s`, load time, total. It never probes a cloud model, because
-measuring one would send the probe off the machine. A machine whose only models
-are cloud models is reported as having none.
+counters — `tok/s`, load time, total. It does not probe a cloud model: the
+measurement would leave the machine, and the number would describe a network hop
+rather than a local inference.
 
 `curl` is the transport, for the same reason `model download` uses it: it is
 already a runtime dependency, and Ollama's API is plain JSON over HTTP. Requests
@@ -307,9 +309,9 @@ is still parsed defensively, and a malformed row is dropped rather than failing
 the batch. The client covers `GET /api/version`, `GET /api/tags`,
 `POST /api/generate` and `POST /api/chat`.
 
-`hippo-dictate ollama run` is the exception to the refusal above: it takes a
-prompt you typed yourself and sends it to whatever model you name, cloud or not.
-It is a debugging tool, and it never sees a transcript.
+`hippo-dictate ollama run` takes a prompt you typed yourself and sends it to
+whatever model you name, cloud or not. It is a debugging tool, and it never sees
+a transcript.
 
 Hotkeys are the exception: the Windows daemon registers its chords at startup, so
 a new chord needs a restart. Nothing else does.

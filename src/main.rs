@@ -647,11 +647,15 @@ fn doctor_ollama(
     let local = models.iter().filter(|model| !model.is_remote()).count();
     let preferred = preferred.unwrap_or(&config.ollama_model);
     let chosen = suggest::choose_model(&models, preferred);
-    // Only a model on disk is probed: asking `ollama.com` how fast it is would be
-    // the exact call this app exists not to make.
-    let speed = match &chosen {
-        Ok(model) => client.generate_stats(model, PROBE).ok(),
-        Err(_) => None,
+    let chosen_model = chosen
+        .as_ref()
+        .ok()
+        .and_then(|name| models.iter().find(|model| &model.name == name));
+    // Only a model on disk is probed. A cloud model can be used on purpose, but a
+    // timing probe is not worth a request that leaves the machine.
+    let speed = match chosen_model {
+        Some(model) if !model.is_remote() => client.generate_stats(&model.name, PROBE).ok(),
+        _ => None,
     };
 
     if json {
@@ -679,6 +683,7 @@ fn doctor_ollama(
                 "local_models": local,
                 "selected": chosen.as_ref().ok(),
                 "selected_error": chosen.as_ref().err().map(|error| error.to_string()),
+                "selected_remote_host": chosen_model.and_then(|model| model.remote_host.clone()),
                 "speed": speed,
             })
         );
@@ -698,7 +703,12 @@ fn doctor_ollama(
         }
     }
     match &chosen {
-        Ok(model) => println!("selected      {model}"),
+        Ok(model) => match chosen_model {
+            Some(entry) if entry.is_remote() => {
+                println!("selected      {model} (cloud, served from {})", entry.host())
+            }
+            _ => println!("selected      {model}"),
+        },
         Err(error) => println!("selected      none: {error}"),
     }
     match &speed {
@@ -712,6 +722,9 @@ fn doctor_ollama(
             stats.total_seconds(),
             stats.eval_count,
         ),
+        None if chosen_model.is_some_and(|model| model.is_remote()) => println!(
+            "speed         not measured: a cloud model, so the probe would leave this machine"
+        ),
         None => println!(
             "speed         {}",
             if chosen.is_ok() {
@@ -723,9 +736,8 @@ fn doctor_ollama(
     }
     if models.iter().any(|model| model.is_remote()) {
         println!();
-        println!("warning       a cloud model sends the prompt to the server that serves it;");
-        println!("              the suggestion run refuses one for that reason. To fix it, run");
-        println!("              `ollama pull <model>` and set `ollama_model` to that name.");
+        println!("warning       a cloud model sends the prompt to the server that serves it.");
+        println!("              Nothing picks one unless `ollama_model` names it.");
     }
     Ok(())
 }
