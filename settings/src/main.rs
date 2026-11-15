@@ -7,9 +7,10 @@
 
 use hippo_dictate::capture;
 use hippo_dictate::chord::Chord;
-use hippo_dictate::config::{Config, PasteMethod};
+use hippo_dictate::config::{Clipboard, Config, PasteMethod};
 use hippo_dictate::history;
 use hippo_dictate::model;
+use hippo_dictate::text as rules;
 use hippo_ui::rows::{settings_divider, settings_row, switch_row};
 use hippo_ui::styles::*;
 use hippo_ui::tokens::{self, AppTheme, Scheme};
@@ -110,6 +111,20 @@ enum Message {
     ToggleTones,
     ToggleHistory,
     ToggleTrailing,
+    ToggleCleanup,
+    ToggleFormatting,
+    TogglePunctuation,
+    ToggleCommands,
+    Clipboard(Clipboard),
+    Preview(String),
+    SnippetTrigger(usize, String),
+    SnippetText(usize, String),
+    AddSnippet,
+    RemoveSnippet(usize),
+    ReplacementFrom(usize, String),
+    ReplacementTo(usize, String),
+    AddReplacement,
+    RemoveReplacement(usize),
     Refresh,
     /// A pane request arrived from another instance.
     PollRequest,
@@ -127,6 +142,8 @@ struct Settings {
     copied: Option<usize>,
     saved: bool,
     error: Option<String>,
+    /// A phrase the rules are run on as you type, so the switches are not blind.
+    preview: String,
     model_state: String,
     hotkey_draft: String,
     hotkey_error: Option<String>,
@@ -193,6 +210,7 @@ impl Settings {
                 entries,
                 copied: None,
                 saved: false,
+                preview: "um, mail sean at sign example dot com".to_string(),
                 error: config_error,
                 model_state,
             },
@@ -267,6 +285,56 @@ impl Settings {
                 self.entries = load_entries(&self.config);
             }
             Message::ToggleTrailing => self.config.trailing_space = !self.config.trailing_space,
+            Message::ToggleCleanup => self.config.cleanup = !self.config.cleanup,
+            Message::ToggleFormatting => self.config.formatting = !self.config.formatting,
+            Message::TogglePunctuation => {
+                self.config.punctuation_commands = !self.config.punctuation_commands
+            }
+            Message::ToggleCommands => self.config.commands = !self.config.commands,
+            Message::Clipboard(kind) => self.config.clipboard = kind,
+            Message::Preview(text) => self.preview = text,
+            Message::SnippetTrigger(index, trigger) => {
+                if let Some(snippet) = self.config.snippets.get_mut(index) {
+                    snippet.trigger = trigger;
+                }
+            }
+            Message::SnippetText(index, text) => {
+                if let Some(snippet) = self.config.snippets.get_mut(index) {
+                    snippet.text = text;
+                }
+            }
+            Message::AddSnippet => self.config.snippets.push(hippo_dictate::config::Snippet {
+                trigger: String::new(),
+                text: String::new(),
+            }),
+            Message::RemoveSnippet(index) => {
+                if index < self.config.snippets.len() {
+                    self.config.snippets.remove(index);
+                }
+            }
+            Message::ReplacementFrom(index, from) => {
+                if let Some(rule) = self.config.replacements.get_mut(index) {
+                    rule.from = from;
+                }
+            }
+            Message::ReplacementTo(index, to) => {
+                if let Some(rule) = self.config.replacements.get_mut(index) {
+                    rule.to = to;
+                }
+            }
+            Message::AddReplacement => {
+                self.config
+                    .replacements
+                    .push(hippo_dictate::config::Replacement {
+                        from: String::new(),
+                        to: String::new(),
+                    })
+            }
+            Message::RemoveReplacement(index) => {
+                if index < self.config.replacements.len() {
+                    self.config.replacements.remove(index);
+                }
+            }
             Message::Refresh => self.entries = load_entries(&self.config),
             Message::PollRequest => {
                 if let Some(pane) = take_requested_pane() {
@@ -315,7 +383,7 @@ impl Settings {
                 return;
             }
         }
-        match write_config(&path, &self.config) {
+        match write_config(&path, &pruned(&self.config)) {
             Ok(()) => {
                 self.saved = true;
                 self.error = None;
@@ -395,6 +463,55 @@ impl Settings {
     }
 
     fn settings_pane(&self, scheme: Scheme) -> Element<'_, Message> {
+        let preview = match rules::apply(&self.preview, &self.config) {
+            rules::Outcome::Text(text) => text,
+            rules::Outcome::Command(command) => format!("command: {}", command.arg()),
+        };
+        let preview = if self.preview.trim().is_empty() {
+            "Type a phrase to see what the rules do.".to_string()
+        } else {
+            format!("Result: {preview}")
+        };
+        let mut snippets = column![].spacing(tokens::SPACE_2XS).width(Length::Fill);
+        for (index, snippet) in self.config.snippets.iter().enumerate() {
+            snippets = snippets.push(
+                row![
+                    text_input("trigger", snippet.trigger.as_str())
+                        .on_input(move |text| Message::SnippetTrigger(index, text))
+                        .style(pill_input)
+                        .width(Length::FillPortion(2)),
+                    text_input("becomes this", snippet.text.as_str())
+                        .on_input(move |text| Message::SnippetText(index, text))
+                        .style(pill_input)
+                        .width(Length::FillPortion(3)),
+                    button(text("\u{2715}").size(tokens::TEXT_SM))
+                        .on_press(Message::RemoveSnippet(index))
+                        .style(segment_button(scheme, false, false, false)),
+                ]
+                .spacing(tokens::SPACE_SM)
+                .align_y(iced::Alignment::Center),
+            );
+        }
+        let mut replacements = column![].spacing(tokens::SPACE_2XS).width(Length::Fill);
+        for (index, rule) in self.config.replacements.iter().enumerate() {
+            replacements = replacements.push(
+                row![
+                    text_input("heard", rule.from.as_str())
+                        .on_input(move |text| Message::ReplacementFrom(index, text))
+                        .style(pill_input)
+                        .width(Length::FillPortion(2)),
+                    text_input("written", rule.to.as_str())
+                        .on_input(move |text| Message::ReplacementTo(index, text))
+                        .style(pill_input)
+                        .width(Length::FillPortion(3)),
+                    button(text("\u{2715}").size(tokens::TEXT_SM))
+                        .on_press(Message::RemoveReplacement(index))
+                        .style(segment_button(scheme, false, false, false)),
+                ]
+                .spacing(tokens::SPACE_SM)
+                .align_y(iced::Alignment::Center),
+            );
+        }
         let device_value = self
             .config
             .device
@@ -432,6 +549,77 @@ impl Settings {
                 Message::ToggleTrailing,
                 scheme,
             ),
+            settings_divider(scheme),
+            section("Text", scheme),
+            switch_row(
+                "Cleanup",
+                "Strip fillers and repeated words, and tidy the spacing",
+                self.config.cleanup,
+                true,
+                Message::ToggleCleanup,
+                scheme,
+            ),
+            switch_row(
+                "Formatting",
+                "Turn \"at sign\" and \"dot com\" into an address",
+                self.config.formatting,
+                true,
+                Message::ToggleFormatting,
+                scheme,
+            ),
+            switch_row(
+                "Spoken punctuation",
+                "Treat \"comma\" and \"new paragraph\" as punctuation. Never an Enter key",
+                self.config.punctuation_commands,
+                true,
+                Message::TogglePunctuation,
+                scheme,
+            ),
+            switch_row(
+                "Voice commands",
+                "\"scratch that\" discards the utterance, \"quit hippo\" stops the daemon",
+                self.config.commands,
+                true,
+                Message::ToggleCommands,
+                scheme,
+            ),
+            settings_row(
+                "Clipboard after",
+                pick_list(
+                    Clipboard::ALL.as_slice(),
+                    Some(self.config.clipboard),
+                    Message::Clipboard,
+                )
+                .style(pill_pick(scheme)),
+                scheme,
+            ),
+            settings_row(
+                "Try a phrase",
+                text_input("type a phrase", self.preview.as_str())
+                    .on_input(Message::Preview)
+                    .style(pill_input)
+                    .width(Length::Fill),
+                scheme,
+            ),
+            text(preview).size(tokens::TEXT_XS).color(scheme.muted),
+            settings_divider(scheme),
+            section("Snippets", scheme),
+            text("Say the trigger as the whole utterance and the text replaces it.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
+            snippets,
+            button(text("Add snippet").size(tokens::TEXT_SM))
+                .on_press(Message::AddSnippet)
+                .style(segment_button(scheme, false, false, false)),
+            settings_divider(scheme),
+            section("Replacements", scheme),
+            text("Whole words, case-insensitive, applied after everything else.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
+            replacements,
+            button(text("Add replacement").size(tokens::TEXT_SM))
+                .on_press(Message::AddReplacement)
+                .style(segment_button(scheme, false, false, false)),
             settings_divider(scheme),
             section("Activation", scheme),
             settings_row(
@@ -752,6 +940,19 @@ fn load_entries(config: &Config) -> Vec<history::Entry> {
 ///
 /// `device` is the one field whose "unset" state has to be written as an absence:
 /// `None` means the host default, so the key is removed rather than left behind.
+/// A row the user opened and left blank is not a rule: writing it out would leave
+/// dead entries in the file for every abandoned "Add".
+fn pruned(config: &Config) -> Config {
+    let mut config = config.clone();
+    config
+        .snippets
+        .retain(|snippet| !snippet.trigger.trim().is_empty());
+    config
+        .replacements
+        .retain(|rule| !rule.from.trim().is_empty());
+    config
+}
+
 fn write_config(path: &std::path::Path, config: &Config) -> Result<(), String> {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     // A file that will not parse is left alone. The window is showing defaults
@@ -870,6 +1071,30 @@ mod tests {
         assert_eq!(back.device, None);
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn blank_rows_are_not_written_out() {
+        let mut config = Config::default();
+        config.snippets = vec![
+            hippo_dictate::config::Snippet {
+                trigger: "link".to_string(),
+                text: "https://example.invalid".to_string(),
+            },
+            hippo_dictate::config::Snippet {
+                trigger: "  ".to_string(),
+                text: "abandoned".to_string(),
+            },
+        ];
+        config.replacements = vec![hippo_dictate::config::Replacement {
+            from: String::new(),
+            to: "nothing".to_string(),
+        }];
+
+        let kept = pruned(&config);
+        assert_eq!(kept.snippets.len(), 1);
+        assert_eq!(kept.snippets[0].trigger, "link");
+        assert!(kept.replacements.is_empty());
     }
 
     #[test]

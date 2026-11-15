@@ -84,6 +84,23 @@ pub enum Clipboard {
     Replace,
 }
 
+impl Clipboard {
+    pub const ALL: [Clipboard; 2] = [Clipboard::Keep, Clipboard::Replace];
+
+    pub fn arg(self) -> &'static str {
+        match self {
+            Clipboard::Keep => "keep",
+            Clipboard::Replace => "replace",
+        }
+    }
+}
+
+impl core::fmt::Display for Clipboard {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.arg())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {

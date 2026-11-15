@@ -218,7 +218,9 @@ make it worse.
 
 `hippo-dictate text "um, mail sean at sign example dot com"` runs the pass on a
 string and prints what would be pasted, which is the fastest way to check a
-dictionary rule.
+dictionary rule. The settings window has the same thing live: five switches for
+the rules and the clipboard, a phrase box that shows the result as you type, and
+row editors for snippets and replacements.
 
 Hotkeys are the exception: the Windows daemon registers its chords at startup, so
 a new chord needs a restart. Nothing else does.
