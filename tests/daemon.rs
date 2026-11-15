@@ -719,3 +719,22 @@ fn the_previous_clipboard_comes_back_at_the_next_press() {
     );
     let _ = daemon::request("quit");
 }
+
+#[test]
+fn a_list_shape_reaches_delivery_and_a_terminal_still_gets_one_line() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+
+    // Not a terminal: the bullets survive, which is the point of asking for them.
+    let _editor = Fixture::start(
+        "shape-editor",
+        "paste = \"none\"\ntones = false\nhistory = false\n",
+        Some("buy milk. book a table. as a list"),
+        &[("HIPPO_DICTATE_FAKE_FOCUS", "firefox:1")],
+    );
+    let shaped = deliver_once().expect("a transcript");
+    assert!(
+        shaped.contains('\n') && shaped.contains("\u{2022} "),
+        "the list shape did not reach delivery: {shaped:?}"
+    );
+    let _ = daemon::request("quit");
+}

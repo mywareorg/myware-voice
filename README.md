@@ -194,7 +194,10 @@ testable and why they cannot invent a word you did not say.
   injected Enter.
 - `commands = true` — a whole utterance can be an instruction: "scratch that"
   discards it, "quit hippo" stops the daemon. It only matches the whole
-  utterance, so a sentence that contains the words is still a sentence.
+  utterance, so a sentence that contains the words is still a sentence. A
+  trailing instruction shapes the text instead: "… as a list" makes one bullet per
+  sentence, "… on one line" joins it up. A terminal still gets one line, because a
+  newline pasted into a shell runs the next word as a command.
 - `[[snippets]]` — a trigger phrase that expands to fixed text, on an exact
   whole-utterance match.
 - `[[replacements]]` — whole-word, case-insensitive substitutions, applied last.

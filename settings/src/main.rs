@@ -582,7 +582,7 @@ impl Settings {
             ),
             switch_row(
                 "Voice commands",
-                "\"scratch that\" discards the utterance, \"quit hippo\" stops the daemon",
+                "\"scratch that\" discards, \"quit hippo\" stops, \"as a list\" makes bullets",
                 self.config.commands,
                 true,
                 Message::ToggleCommands,

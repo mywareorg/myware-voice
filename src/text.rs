@@ -73,6 +73,64 @@ const DOMAINS: &[&str] = &[
     "com", "org", "net", "io", "dev", "ai", "co", "app", "uk", "de",
 ];
 
+/// A trailing instruction that reshapes the whole utterance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// Join everything onto one line.
+    OneLine,
+    /// One bullet per sentence.
+    Bullets,
+}
+
+/// Recognise and strip a trailing instruction: "… as a list", "… on one line".
+///
+/// Only the suffix is consumed; the words before it are the utterance. Kept
+/// separate from [`apply`] so the transform happens after formatting, where a
+/// newline it inserts is not collapsed again.
+fn shape_of(text: &str) -> (String, Option<Shape>) {
+    const SUFFIXES: [(&str, Shape); 4] = [
+        (" as a list", Shape::Bullets),
+        (" as bullets", Shape::Bullets),
+        (" on one line", Shape::OneLine),
+        (" as one line", Shape::OneLine),
+    ];
+    let lower = text.to_lowercase();
+    // The suffixes are ASCII, so this keeps the byte offsets usable on the original.
+    if lower.len() != text.len() {
+        return (text.to_string(), None);
+    }
+    for (suffix, shape) in SUFFIXES {
+        if lower.ends_with(suffix) {
+            let cut = text.len() - suffix.len();
+            return (text[..cut].trim_end().to_string(), Some(shape));
+        }
+    }
+    (text.to_string(), None)
+}
+
+/// One bullet per sentence, split after terminal punctuation.
+fn bullets(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text.trim();
+    while !rest.is_empty() {
+        let split = rest
+            .find(['.', '!', '?'])
+            .map(|index| index + 1)
+            .unwrap_or(rest.len());
+        let (sentence, tail) = rest.split_at(split);
+        let sentence = sentence.trim();
+        if !sentence.is_empty() {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str("\u{2022} ");
+            out.push_str(sentence);
+        }
+        rest = tail.trim_start();
+    }
+    out
+}
+
 /// The whole pipeline for one utterance.
 pub fn apply(raw: &str, config: &Config) -> Outcome {
     let cleaned = if config.cleanup {
@@ -90,7 +148,13 @@ pub fn apply(raw: &str, config: &Config) -> Outcome {
         return Outcome::Text(snippet.to_string());
     }
 
-    let mut text = cleaned;
+    // A trailing "as a list" is an instruction rather than words to keep, and it
+    // travels with voice commands: both are things you say to the app.
+    let (mut text, shape) = if config.commands {
+        shape_of(&cleaned)
+    } else {
+        (cleaned, None)
+    };
     if config.punctuation_commands {
         text = punctuation(&text);
     }
@@ -98,6 +162,14 @@ pub fn apply(raw: &str, config: &Config) -> Outcome {
         text = formatting(&text);
     }
     text = replace(&text, config);
+    // Last, so the newlines a shape inserts are not tidied away. A terminal still
+    // gets one line: the daemon flattens by focus, which is where bullets become
+    // pointless anyway.
+    let text = match shape {
+        Some(Shape::OneLine) => flatten(&text),
+        Some(Shape::Bullets) => bullets(&text),
+        None => text,
+    };
     Outcome::Text(tidy(&text))
 }
 
@@ -478,6 +550,23 @@ mod tests {
         let mut config = config();
         config.commands = false;
         assert!(matches!(apply("scratch that", &config), Outcome::Text(_)));
+    }
+
+    #[test]
+    fn a_trailing_instruction_reshapes_the_utterance() {
+        // The suffix is an instruction, not something to keep.
+        assert_eq!(
+            text("buy milk. book a table. call Ada. as a list", &config()),
+            "\u{2022} buy milk.\n\u{2022} book a table.\n\u{2022} call Ada."
+        );
+        assert_eq!(
+            text("the meeting moved to four on one line", &config()),
+            "the meeting moved to four"
+        );
+        // With voice commands off, it is just words again.
+        let mut plain = config();
+        plain.commands = false;
+        assert_eq!(text("buy milk as a list", &plain), "buy milk as a list");
     }
 
     #[test]
