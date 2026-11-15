@@ -11,6 +11,7 @@ use hippo_dictate::config::{Clipboard, Config, PasteMethod};
 use hippo_dictate::history;
 use hippo_dictate::model;
 use hippo_dictate::text as rules;
+use hippo_ui::buttons::{icon_colored, labelled};
 use hippo_ui::rows::{settings_divider, settings_row, switch_row};
 use hippo_ui::styles::*;
 use hippo_ui::tokens::{self, AppTheme, Scheme};
@@ -832,9 +833,13 @@ impl Settings {
                         .on_input(move |text| Message::SnippetText(index, text))
                         .style(pill_input)
                         .width(Length::FillPortion(3)),
-                    button(text("\u{2715}").size(tokens::TEXT_SM))
-                        .on_press(Message::RemoveSnippet(index))
-                        .style(segment_button(scheme, false, false, false)),
+                    button(icon_colored(
+                        hippo_ui::ICON_CLOSE,
+                        tokens::TEXT_SM,
+                        scheme.text
+                    ))
+                    .on_press(Message::RemoveSnippet(index))
+                    .style(segment_button(scheme, false, false, false)),
                 ]
                 .spacing(tokens::SPACE_SM)
                 .align_y(iced::Alignment::Center),
@@ -853,9 +858,13 @@ impl Settings {
                         .on_input(move |text| Message::ReplacementTo(index, text))
                         .style(pill_input)
                         .width(Length::FillPortion(3)),
-                    button(text("\u{2715}").size(tokens::TEXT_SM))
-                        .on_press(Message::RemoveReplacement(index))
-                        .style(segment_button(scheme, false, false, false)),
+                    button(icon_colored(
+                        hippo_ui::ICON_CLOSE,
+                        tokens::TEXT_SM,
+                        scheme.text
+                    ))
+                    .on_press(Message::RemoveReplacement(index))
+                    .style(segment_button(scheme, false, false, false)),
                 ]
                 .spacing(tokens::SPACE_SM)
                 .align_y(iced::Alignment::Center),
@@ -989,10 +998,9 @@ impl Settings {
                 )
                 .size(tokens::TEXT_SM)
                 .color(scheme.muted),
-                button(text("Open settings").size(16.0))
+                labelled("Open settings")
                     .on_press(Message::Pane(Pane::Dictation))
                     .style(pill_button_secondary)
-                    .height(Length::Fixed(tokens::CONTROL_HEIGHT))
                     .padding([0, 14]),
             ]
             .spacing(tokens::SPACE_LG)
@@ -1236,9 +1244,13 @@ fn rule_rows<'a>(
             );
         }
         entry = entry.push(
-            button(text("\u{2715}").size(tokens::TEXT_SM))
-                .on_press(Message::RemoveRule(list, index))
-                .style(segment_button(scheme, false, false, false)),
+            button(icon_colored(
+                hippo_ui::ICON_CLOSE,
+                tokens::TEXT_SM,
+                scheme.text,
+            ))
+            .on_press(Message::RemoveRule(list, index))
+            .style(segment_button(scheme, false, false, false)),
         );
         table = table.push(
             entry
@@ -1315,9 +1327,8 @@ fn write_config(path: &std::path::Path, config: &Config) -> Result<(), String> {
 }
 
 fn tab<'a>(label: &'a str, pane: Pane, current: Pane, scheme: Scheme) -> Element<'a, Message> {
-    button(text(label).size(16.0))
+    labelled(label)
         .padding([0, 12])
-        .height(Length::Fixed(tokens::CONTROL_HEIGHT))
         .style(segment_button(scheme, current == pane, false, false))
         .on_press(Message::Pane(pane))
         .into()

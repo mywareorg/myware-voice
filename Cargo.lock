@@ -1775,7 +1775,7 @@ dependencies = [
 [[package]]
 name = "hippo-ui"
 version = "0.1.0"
-source = "git+https://gitlab.com/librewarelive/hippo-ui?rev=a20f31b9c51b9ea1894f7500f4751bb9b91b0440#a20f31b9c51b9ea1894f7500f4751bb9b91b0440"
+source = "git+https://gitlab.com/librewarelive/hippo-ui?rev=3b4253c222fb14d0110477a0655af219b547cf08#3b4253c222fb14d0110477a0655af219b547cf08"
 dependencies = [
  "iced",
  "serde",
