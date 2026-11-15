@@ -35,6 +35,70 @@ pub const DEFAULT_BASE: &str = "http://127.0.0.1:11434";
 /// How long a request waits before curl gives up.
 pub const DEFAULT_TIMEOUT_SECONDS: u64 = 30;
 
+/// One model the server can serve.
+///
+/// `remote_host` is the important field: a local Ollama server can proxy models
+/// from `ollama.com`, and the base URL being loopback says nothing about where
+/// the prompt goes. Every caller that sends user text has to check this.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Model {
+    pub name: String,
+    /// Set when the server reaches the model over the network instead of reading
+    /// it from disk.
+    pub remote_host: Option<String>,
+}
+
+impl Model {
+    /// Whether using this model would send the prompt off this machine.
+    ///
+    /// The field is authoritative. The name check is a fallback for a server too
+    /// old to report the field, which still names its proxied models `:cloud` or
+    /// `-cloud`.
+    pub fn is_remote(&self) -> bool {
+        self.remote_host.is_some()
+            || self.name.ends_with(":cloud")
+            || self.name.contains("-cloud")
+    }
+
+    /// Where it is served from, for a message. Unknown when only the name gave it
+    /// away.
+    pub fn host(&self) -> &str {
+        self.remote_host.as_deref().unwrap_or("ollama.com")
+    }
+}
+
+/// One completion and the server's own timings for it.
+///
+/// The fields are the ones `/api/generate` returns when it is not streaming.
+/// `eval_count` over `eval_duration` is generation speed with the model resident;
+/// `load_duration` is what a cold call costs before it answers.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Completion {
+    pub response: String,
+    pub eval_count: u64,
+    pub eval_duration_ns: u64,
+    pub load_duration_ns: u64,
+    pub total_duration_ns: u64,
+}
+
+impl Completion {
+    /// Tokens per second, once the model was loaded.
+    pub fn tokens_per_second(&self) -> Option<f64> {
+        if self.eval_duration_ns == 0 || self.eval_count == 0 {
+            return None;
+        }
+        Some(self.eval_count as f64 / (self.eval_duration_ns as f64 / 1e9))
+    }
+
+    pub fn load_seconds(&self) -> f64 {
+        self.load_duration_ns as f64 / 1e9
+    }
+
+    pub fn total_seconds(&self) -> f64 {
+        self.total_duration_ns as f64 / 1e9
+    }
+}
+
 /// A request against a local Ollama server.
 #[derive(Debug, Clone)]
 pub struct Client {
@@ -124,8 +188,8 @@ impl Client {
         Ok(reply.version)
     }
 
-    /// The names of the models installed on the server.
-    pub fn models(&self) -> Result<Vec<String>> {
+    /// The models installed on the server, with where each one is served from.
+    pub fn models_detailed(&self) -> Result<Vec<Model>> {
         #[derive(Deserialize)]
         struct Reply {
             #[serde(default)]
@@ -134,16 +198,43 @@ impl Client {
         #[derive(Deserialize)]
         struct Entry {
             name: String,
+            #[serde(default)]
+            remote_host: Option<String>,
         }
 
         let body = self.request("/api/tags", None)?;
         let reply: Reply = serde_json::from_str(&body)
             .with_context(|| format!("ollama: unexpected /api/tags response: {body}"))?;
-        Ok(reply.models.into_iter().map(|entry| entry.name).collect())
+        Ok(reply
+            .models
+            .into_iter()
+            .map(|entry| Model {
+                name: entry.name,
+                remote_host: entry.remote_host.filter(|host| !host.trim().is_empty()),
+            })
+            .collect())
+    }
+
+    /// The names of the models installed on the server.
+    pub fn models(&self) -> Result<Vec<String>> {
+        Ok(self
+            .models_detailed()?
+            .into_iter()
+            .map(|model| model.name)
+            .collect())
     }
 
     /// Run one prompt through a model and return the completion.
     pub fn generate(&self, model: &str, prompt: &str) -> Result<String> {
+        Ok(self.generate_with(model, prompt, None)?.response)
+    }
+
+    /// Run one prompt and return the completion with the server's timings.
+    ///
+    /// The timings are the server's own, not a wall clock around the process: a
+    /// number that includes `curl` startup and JSON encoding is not the number a
+    /// latency decision needs.
+    pub fn generate_stats(&self, model: &str, prompt: &str) -> Result<Completion> {
         self.generate_with(model, prompt, None)
     }
 
@@ -154,10 +245,10 @@ impl Client {
     /// between a reply that parses every time and one that parses most of the
     /// time. The caller still parses defensively.
     pub fn generate_json(&self, model: &str, prompt: &str) -> Result<String> {
-        self.generate_with(model, prompt, Some("json"))
+        Ok(self.generate_with(model, prompt, Some("json"))?.response)
     }
 
-    fn generate_with(&self, model: &str, prompt: &str, format: Option<&str>) -> Result<String> {
+    fn generate_with(&self, model: &str, prompt: &str, format: Option<&str>) -> Result<Completion> {
         #[derive(Serialize)]
         struct Request<'a> {
             model: &'a str,
@@ -166,10 +257,18 @@ impl Client {
             #[serde(skip_serializing_if = "Option::is_none")]
             format: Option<&'a str>,
         }
-        #[derive(Deserialize)]
+        #[derive(Deserialize, Default)]
         struct Reply {
             #[serde(default)]
             response: String,
+            #[serde(default)]
+            eval_count: u64,
+            #[serde(default)]
+            eval_duration: u64,
+            #[serde(default)]
+            load_duration: u64,
+            #[serde(default)]
+            total_duration: u64,
         }
 
         let request = serde_json::to_string(&Request {
@@ -182,7 +281,13 @@ impl Client {
         let body = self.request("/api/generate", Some(&request))?;
         let reply: Reply = serde_json::from_str(&body)
             .with_context(|| format!("ollama: unexpected /api/generate response: {body}"))?;
-        Ok(reply.response)
+        Ok(Completion {
+            response: reply.response,
+            eval_count: reply.eval_count,
+            eval_duration_ns: reply.eval_duration,
+            load_duration_ns: reply.load_duration,
+            total_duration_ns: reply.total_duration,
+        })
     }
 
     /// Continue a chat history and return the assistant's next message.
@@ -360,6 +465,50 @@ mod tests {
         let client = Client::new(base).expect("client");
         let messages = [Message::user("say ok")];
         assert_eq!(client.chat("tiny", &messages).expect("text"), "ok");
+    }
+
+    #[test]
+    fn a_cloud_model_is_named_by_the_tags_reply() {
+        let body = r#"{"models":[
+            {"name":"llama3.2:3b","size":2019393189},
+            {"name":"big:70b","remote_host":"https://ollama.com"}
+        ]}"#;
+        let base = serve_once(body);
+        let client = Client::new(base).expect("client");
+        let models = client.models_detailed().expect("models");
+        assert_eq!(models.len(), 2);
+        assert!(!models[0].is_remote());
+        assert!(models[1].is_remote());
+        assert_eq!(models[1].host(), "https://ollama.com");
+        assert_eq!(client.models().expect("names"), ["llama3.2:3b", "big:70b"]);
+    }
+
+    #[test]
+    fn a_name_is_enough_when_the_server_does_not_say() {
+        // Older servers do not report `remote_host`; the naming convention still
+        // marks a proxied model.
+        for name in ["gpt-oss:120b-cloud", "glm-5.2:cloud"] {
+            let model = Model {
+                name: name.to_string(),
+                remote_host: None,
+            };
+            assert!(model.is_remote(), "{name} should be remote");
+        }
+    }
+
+    #[test]
+    fn speed_is_read_from_the_servers_own_counters() {
+        let completion = Completion {
+            eval_count: 50,
+            eval_duration_ns: 2_000_000_000,
+            load_duration_ns: 400_000_000,
+            ..Completion::default()
+        };
+        assert_eq!(completion.tokens_per_second(), Some(25.0));
+        assert_eq!(completion.load_seconds(), 0.4);
+        // A reply with no generation counters is not a speed of zero; it is a
+        // number nobody can compute.
+        assert_eq!(Completion::default().tokens_per_second(), None);
     }
 
     /// Serve exactly one HTTP request on a loopback port and answer it.

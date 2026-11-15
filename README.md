@@ -268,25 +268,36 @@ the local model which corrections you keep making by hand, and offers them as
 replacement and snippet rules. You accept or dismiss each row; nothing is applied
 without a click, and the model is never in the path of a paste.
 
-Turn on **Keep history** first — the suggestions are drawn from `history.tsv` and
-nothing leaves the machine. The window uses `ollama_model` when it is set and
-otherwise takes the first model the server lists.
+Turn on **Keep history** first — the suggestions are drawn from `history.tsv`.
+
+A local server also serves models from `ollama.com`. The base URL being loopback
+says nothing about where the prompt goes, so the suggestion run checks
+`remote_host` in `/api/tags` and refuses any model the server does not read from
+this machine's disk. There is no setting that overrides that.
 
 - `ollama_url = "http://127.0.0.1:11434"` — the base URL. The client accepts only
   `127.0.0.1`, `localhost` or `::1`; a LAN or cloud host is an error, so there is
   no configuration that turns this into a network client.
-- `ollama_model = ""` — the default model. Empty means a command must name one,
-  and the suggestion run picks the first installed model; nothing is chosen
-  silently.
+- `ollama_model = ""` — the default model. Empty means the suggestion run takes
+  the first model **on disk**, and the `run` command must be given a name; nothing
+  is chosen silently.
 - `ollama_timeout_seconds = 30` — how long a request waits before it is abandoned.
 
-Three commands exercise the interface against the live server:
+Four commands exercise the interface against the live server:
 
 ```bash
 hippo-dictate ollama version
 hippo-dictate ollama models
 hippo-dictate ollama run llama3.2 "Rewrite this sentence more plainly."
+hippo-dictate ollama doctor          # add --json for one object
 ```
+
+`doctor` is the one to run first. It prints the server's version, every installed
+model marked `local` or `CLOUD <host>`, which model a suggestion run would pick
+and why not if it cannot, and one completion's speed from the server's own
+counters — `tok/s`, load time, total. It never probes a cloud model, because
+measuring one would send the probe off the machine. A machine whose only models
+are cloud models is reported as having none.
 
 `curl` is the transport, for the same reason `model download` uses it: it is
 already a runtime dependency, and Ollama's API is plain JSON over HTTP. Requests
@@ -296,10 +307,9 @@ is still parsed defensively, and a malformed row is dropped rather than failing
 the batch. The client covers `GET /api/version`, `GET /api/tags`,
 `POST /api/generate` and `POST /api/chat`.
 
-The loopback check is on the server, not the model: Ollama's own cloud models are
-reachable through a local server, and the client cannot tell one from a model on
-disk. Keep `ollama_model` pointing at a model that is actually local until the
-feature that uses it can say otherwise.
+`hippo-dictate ollama run` is the exception to the refusal above: it takes a
+prompt you typed yourself and sends it to whatever model you name, cloud or not.
+It is a debugging tool, and it never sees a transcript.
 
 Hotkeys are the exception: the Windows daemon registers its chords at startup, so
 a new chord needs a restart. Nothing else does.

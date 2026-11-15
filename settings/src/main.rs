@@ -1496,30 +1496,16 @@ fn add_button<'a>(label: &'a str, list: RuleList, scheme: Scheme) -> Element<'a,
 
 /// The blocking half of `Message::SuggestStart`, run off the executor thread.
 ///
-/// The model is whatever the config names; an empty name means the model has
-/// never been picked, so the first thing the server has installed is used rather
-/// than failing with nothing to say.
+/// The model is chosen inside `suggest`: that is where the rule lives that it
+/// must be one the server reads from this machine. An empty `ollama_model` means
+/// the first model on disk, not the first model listed.
 fn run_suggest(config: &Config) -> Result<Vec<Proposal>, String> {
     let client = ollama::Client::with_timeout(
         &config.ollama_url,
         Duration::from_secs(config.ollama_timeout_seconds.max(1)),
     )
     .map_err(|error| error.to_string())?;
-    let model = if config.ollama_model.trim().is_empty() {
-        let models = client.models().map_err(|error| error.to_string())?;
-        match models.first() {
-            Some(model) => model.clone(),
-            None => {
-                return Err(
-                    "suggest: no models installed on the local server; run `ollama pull <model>`"
-                        .to_string(),
-                )
-            }
-        }
-    } else {
-        config.ollama_model.clone()
-    };
-    suggest::suggest(&client, &model, config.history_days, config)
+    suggest::suggest(&client, &config.ollama_model, config.history_days, config)
         .map_err(|error| error.to_string())
 }
 

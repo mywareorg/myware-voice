@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 use crate::history;
-use crate::ollama::Client;
+use crate::ollama::{self, Client};
 
 /// How many transcripts one prompt carries.
 const MAX_ENTRIES: usize = 60;
@@ -244,19 +244,54 @@ pub fn parse(raw: &str) -> Result<Vec<Proposal>> {
     Ok(proposals)
 }
 
+/// The model one suggestion run may use.
+///
+/// A local server can serve models from `ollama.com`, so "the server is on
+/// loopback" does not mean "the history stays here". This is the check that
+/// makes the difference: the only model a suggestion may use is one the server
+/// reads from this machine's disk.
+///
+/// Pure over the model list so the policy is testable without a server.
+pub fn choose_model(models: &[ollama::Model], preferred: &str) -> Result<String> {
+    let preferred = preferred.trim();
+    if models.is_empty() {
+        bail!("no models installed; run `ollama pull <model>`");
+    }
+    if !preferred.is_empty() {
+        return match models.iter().find(|model| model.name == preferred) {
+            None => bail!("{preferred} is not installed on the local server"),
+            Some(model) if model.is_remote() => bail!(
+                "{preferred} is served from {} — that would send the history off this machine. Pull a model that is on disk and name that instead.",
+                model.host()
+            ),
+            Some(_) => Ok(preferred.to_string()),
+        };
+    }
+    match models.iter().find(|model| !model.is_remote()) {
+        Some(model) => Ok(model.name.clone()),
+        None => bail!(
+            "every installed model is served from {}; none is on this machine. Run `ollama pull <model>`.",
+            models[0].host()
+        ),
+    }
+}
+
 /// Read the history and ask `model` for rules.
 ///
 /// `days` is the window of history to read, and matches what the history pane
-/// shows so the two cannot disagree about what the model saw.
+/// shows so the two cannot disagree about what the model saw. An empty `model`
+/// means "the first one on disk"; [`choose_model`] refuses anything the server
+/// fetches over the network.
 pub fn suggest(
     client: &Client,
     model: &str,
     days: u32,
     config: &Config,
 ) -> Result<Vec<Proposal>> {
-    if model.trim().is_empty() {
-        bail!("suggest: no model; set `ollama_model` in config.toml");
-    }
+    let models = client
+        .models_detailed()
+        .context("suggest: list the models the local server has")?;
+    let model = choose_model(&models, model)?;
     let entries = history::recent(days.max(1))?;
     let texts: Vec<String> = entries
         .into_iter()
@@ -270,7 +305,7 @@ pub fn suggest(
     }
 
     let request = prompt(&texts, config);
-    let raw = client.generate_json(model.trim(), &request)?;
+    let raw = client.generate_json(&model, &request)?;
     let proposals = parse(&raw)?;
 
     // A rule that already exists is not a suggestion. Filtering here rather than
@@ -377,6 +412,45 @@ mod tests {
         assert!(text.contains("sean -> Shaun"));
         assert!(text.contains("- um, mail sean"));
         assert!(text.contains("\"proposals\""));
+    }
+
+    #[test]
+    fn a_cloud_model_is_never_chosen() {
+        let models = [
+            ollama::Model {
+                name: "big:70b".to_string(),
+                remote_host: Some("https://ollama.com".to_string()),
+            },
+            ollama::Model {
+                name: "llama3.2:3b".to_string(),
+                remote_host: None,
+            },
+        ];
+        // Unset: the first model on disk, not the first model listed.
+        assert_eq!(choose_model(&models, "").expect("chosen"), "llama3.2:3b");
+        // Named: honoured when it is local, refused when it is not.
+        assert_eq!(choose_model(&models, "llama3.2:3b").expect("chosen"), "llama3.2:3b");
+        let error = choose_model(&models, "big:70b").expect_err("refused");
+        assert!(error.to_string().contains("off this machine"), "{error}");
+        // Named but absent is a different error from remote.
+        let error = choose_model(&models, "nope").expect_err("refused");
+        assert!(error.to_string().contains("not installed"), "{error}");
+    }
+
+    #[test]
+    fn a_server_with_nothing_local_says_why_it_cannot_run() {
+        let models = [ollama::Model {
+            name: "glm-5.2:cloud".to_string(),
+            remote_host: Some("https://ollama.com".to_string()),
+        }];
+        let error = choose_model(&models, "").expect_err("refused");
+        assert!(error.to_string().contains("none is on this machine"), "{error}");
+    }
+
+    #[test]
+    fn an_empty_server_points_at_the_pull_command() {
+        let error = choose_model(&[], "").expect_err("refused");
+        assert!(error.to_string().contains("ollama pull"), "{error}");
     }
 
     #[test]

@@ -17,6 +17,7 @@ use hippo_dictate::ollama;
 #[cfg(target_os = "linux")]
 use hippo_dictate::popup;
 use hippo_dictate::sherpa::Sherpa;
+use hippo_dictate::suggest;
 use hippo_dictate::text::{self, Outcome};
 
 #[derive(Parser)]
@@ -87,6 +88,14 @@ enum OllamaCommand {
         model: Option<String>,
         /// The prompt, as one argument. Quote it.
         prompt: Vec<String>,
+    },
+    /// Check the server, the models, and what a completion costs here.
+    Doctor {
+        /// Model to measure. Defaults to `ollama_model`, then one on disk.
+        model: Option<String>,
+        /// One JSON object instead of the aligned report.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -589,6 +598,134 @@ fn ollama_command(command: OllamaCommand) -> Result<()> {
                 println!();
             }
         }
+        OllamaCommand::Doctor { model, json } => {
+            doctor_ollama(&client, &config, model.as_deref(), json)?
+        }
+    }
+    Ok(())
+}
+
+/// What one probe asks for. Fixed text, so the number is comparable between runs
+/// and nothing a user said is involved.
+const PROBE: &str = "Reply with the single word ok.";
+
+/// Report whether a feature here can use the server without breaking the rule
+/// that a transcript stays on this machine.
+///
+/// The question is not whether Ollama answers. A local server also serves models
+/// from `ollama.com`, and on a machine where every installed model is one, the
+/// honest answer is that nothing here is usable yet — so this measures in
+/// generation time, from the server's own counters, and refuses to probe a model
+/// it would have to send text away to reach.
+fn doctor_ollama(
+    client: &ollama::Client,
+    config: &Config,
+    preferred: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let base = client.base();
+    let version = match client.version() {
+        Ok(version) => version,
+        Err(error) => {
+            // A server that is not running is the common case, and the answer is
+            // one command away, so it is a report rather than a failure.
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "base": base, "error": error.to_string() })
+                );
+            } else {
+                println!("ollama        {base}");
+                println!("              none: {error}");
+                println!("              start it with `ollama serve`");
+            }
+            return Ok(());
+        }
+    };
+
+    let models = client.models_detailed()?;
+    let local = models.iter().filter(|model| !model.is_remote()).count();
+    let preferred = preferred.unwrap_or(&config.ollama_model);
+    let chosen = suggest::choose_model(&models, preferred);
+    // Only a model on disk is probed: asking `ollama.com` how fast it is would be
+    // the exact call this app exists not to make.
+    let speed = match &chosen {
+        Ok(model) => client.generate_stats(model, PROBE).ok(),
+        Err(_) => None,
+    };
+
+    if json {
+        let speed = speed.as_ref().map(|stats| {
+            serde_json::json!({
+                "tokens_per_second": stats.tokens_per_second(),
+                "eval_count": stats.eval_count,
+                "load_seconds": stats.load_seconds(),
+                "total_seconds": stats.total_seconds(),
+            })
+        });
+        println!(
+            "{}",
+            serde_json::json!({
+                "base": base,
+                "version": version,
+                "models": models
+                    .iter()
+                    .map(|model| serde_json::json!({
+                        "name": model.name,
+                        "remote": model.is_remote(),
+                        "remote_host": model.remote_host,
+                    }))
+                    .collect::<Vec<_>>(),
+                "local_models": local,
+                "selected": chosen.as_ref().ok(),
+                "selected_error": chosen.as_ref().err().map(|error| error.to_string()),
+                "speed": speed,
+            })
+        );
+        return Ok(());
+    }
+
+    println!("ollama        {base}, v{version}");
+    println!(
+        "models        {} installed, {local} on this machine",
+        models.len()
+    );
+    for model in &models {
+        if model.is_remote() {
+            println!("  {:<29} CLOUD {}", model.name, model.host());
+        } else {
+            println!("  {:<29} local", model.name);
+        }
+    }
+    match &chosen {
+        Ok(model) => println!("selected      {model}"),
+        Err(error) => println!("selected      none: {error}"),
+    }
+    match &speed {
+        Some(stats) => println!(
+            "speed         {}, load {:.2} s, {:.2} s total for {} tokens",
+            match stats.tokens_per_second() {
+                Some(rate) => format!("{rate:.1} tok/s"),
+                None => "unmeasured".to_string(),
+            },
+            stats.load_seconds(),
+            stats.total_seconds(),
+            stats.eval_count,
+        ),
+        None => println!(
+            "speed         {}",
+            if chosen.is_ok() {
+                "not measured: the server did not answer the probe"
+            } else {
+                "not measured: there is no model on this machine"
+            }
+        ),
+    }
+    if models.iter().any(|model| model.is_remote()) {
+        println!();
+        println!("warning       a cloud model sends the prompt to the server that serves it;");
+        println!("              the suggestion run refuses one for that reason. To fix it, run");
+        println!("              `ollama pull <model>` and set `ollama_model` to that name.");
     }
     Ok(())
 }
