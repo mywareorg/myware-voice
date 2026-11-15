@@ -47,7 +47,7 @@ struct Tick {
     streaming: bool,
 }
 
-fn main() -> anyhow::Result<()> {
+pub fn run() -> anyhow::Result<()> {
     let connection = wayland_client::Connection::connect_to_env()
         .map_err(|error| anyhow::anyhow!("no Wayland session: {error}"))?;
     let (globals, mut queue) = wayland_client::globals::registry_queue_init::<App>(&connection)?;

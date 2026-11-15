@@ -31,7 +31,7 @@ toml_edit = "0.22"
 
 [[bin]]
 name = "hippo-dictate-overlay"
-path = "src/bin/overlay.rs"
+path = "src/bin/overlay/main.rs"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # The listening popup draws its own layer-shell surface: any ordinary window

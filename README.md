@@ -549,7 +549,8 @@ Or build the release folder in one command from a checkout:
 ```
 
 It enters the Visual Studio developer environment when `link.exe` is not already
-on `PATH`, fetches the runtime if absent, runs the tests, builds both executables,
+on `PATH`, fetches the runtime if absent, runs the tests, builds the three
+executables,
 stages the Visual C++ runtime so a clean machine can start the exe, and writes
 `dist\hippo-dictate-<version>-win-x64` plus a zip of it. `-SkipTests`, `-Dev`, `-NoZip` and `-WithModel` are the useful switches; the
 640 MB model is not bundled unless you ask.
