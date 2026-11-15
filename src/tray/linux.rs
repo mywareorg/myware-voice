@@ -28,9 +28,9 @@ impl Hippo {
     /// Open the settings window, or the history pane of it.
     ///
     /// A request file is what a running window reads to switch panes; a window
-    /// that is not running is started with the pane in its environment. Linux has
-    /// no single-instance handshake here, so a second click opens a second
-    /// window — the honest behaviour rather than a menu item that does nothing.
+    /// that is not running is started with the pane in its environment. If one is
+    /// already open, the settings binary's own handshake hands the pane over and
+    /// raises that window instead of stacking another.
     fn open(&self, pane: &str) {
         let Some(binary) = settings_binary() else {
             crate::log::error("tray: hippo-dictate-settings not found; cannot open the window");
@@ -141,8 +141,9 @@ pub fn spawn(events: Sender<Event>) -> Result<()> {
                 .spawn()
                 {
                     Ok(handle) => {
-                        // Dropping the handle shuts the service down, and this one
-                        // lives as long as the process does.
+                        // The service is meant to outlive this call. Nothing in
+                        // ksni shuts it down on drop today, and forgetting the
+                        // handle keeps that true if it ever changes.
                         std::mem::forget(handle);
                         crate::log::write("tray: registered with the StatusNotifier watcher");
                         return;

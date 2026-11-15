@@ -1144,6 +1144,16 @@ impl Daemon {
             return Ok(());
         }
 
+        // A terminal gets one line. `copy()` trims only trailing newlines, and the
+        // cleanup pass only collapses internal whitespace by accident — with
+        // `cleanup = false` nothing else would, and a newline pasted into a shell
+        // runs the next word as a command.
+        let text = if self.focus.as_ref().is_some_and(|focus| focus.is_terminal()) {
+            crate::text::flatten(&text)
+        } else {
+            text
+        };
+
         let text = if self.config.trailing_space {
             format!("{text} ")
         } else {

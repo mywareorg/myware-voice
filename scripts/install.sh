@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install hippo-dictate for the current user.
 #
-# No root, no system-wide files: the binaries and the sherpa runtime go under
+# No root, no system-wide files: the four binaries and the sherpa runtime go under
 # $PREFIX/libexec/hippo-dictate, and the only thing on PATH is a symlink. The
 # binaries are looked up beside this script (an extracted release) or in
 # target/release (a checkout).
@@ -90,6 +90,10 @@ install -m 755 "$bin_dir/hippo-dictate-settings" "$dest/hippo-dictate-settings"
 install -m 755 "$bin_dir/hippo-dictate-overlay" "$dest/hippo-dictate-overlay"
 # Every .so in lib/: sherpa resolves onnxruntime through its own $ORIGIN rpath, so
 # they have to stay together.
+if ! compgen -G "$lib_dir/*.so" >/dev/null; then
+    echo "no shared objects in $lib_dir; run scripts/fetch-sherpa.sh" >&2
+    exit 1
+fi
 install -m 644 "$lib_dir"/*.so "$dest/lib/"
 
 for binary in hippo-dictate hippo-dictate-daemon hippo-dictate-settings hippo-dictate-overlay; do

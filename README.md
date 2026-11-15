@@ -409,10 +409,12 @@ dictation": the daemon retries for a few seconds in the background and then
 gives up quietly, because a daemon that refused to start without a tray would be
 a worse bug than a missing menu.
 
-Linux has no single-instance handshake for the settings window, so a second click
-opens a second window. That is the honest behaviour rather than a menu item that
-silently does nothing; the window's own "already open" check is Windows-only,
-where the tray was the first way in.
+A second click does not stack a window: the settings binary claims an abstract
+socket named `hippo-dictate-settings`, and a second invocation hands it the pane it
+was asked for, raises the open window and exits. The pane travels through a small
+request file the window polls, which is the same mechanism the tray has always
+used. Raising is `swaymsg`, so on another compositor the pane still switches but
+the window is not brought forward.
 
 ## Settings window
 

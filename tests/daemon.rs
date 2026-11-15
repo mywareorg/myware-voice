@@ -635,7 +635,10 @@ fn a_terminal_never_receives_a_newline() {
     let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
     let _fixture = Fixture::start(
         "terminal-flatten",
-        "paste = \"none\"\ntones = false\nhistory = false\n",
+        // Cleanup off on purpose: the tokenising pass happens to turn a newline
+        // into a space, so this test only proves the flatten rule if it is not
+        // there to hide the newline.
+        "paste = \"none\"\ntones = false\nhistory = false\ncleanup = false\n",
         // The decoder can return a line break: a snippet with one, or a spoken
         // "new paragraph". Pasted into a shell, that is a command boundary.
         Some("hello\nworld"),
