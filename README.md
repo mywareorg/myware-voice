@@ -4,7 +4,8 @@ Push-to-talk dictation. Press the keybind, speak, press it again: the transcript
 goes to the clipboard and is pasted into the window you were typing in.
 
 Local-only. The audio never leaves the machine; there are no accounts, no
-telemetry, and no network use after the model is installed.
+telemetry, and no call leaves the machine after the model is installed. The
+optional Ollama client talks to loopback only.
 
 **Status:** works end to end on sway/Wayland, including streaming dictation
 (`hippo-dictate stream`). The Windows build compiles and is type-checked but has
@@ -258,6 +259,37 @@ string and prints what would be pasted, which is the fastest way to check a rule
 The settings window's **Text** tab has the same thing live: the switches, a phrase
 box that shows the result as you type, and a row editor for every table above —
 fillers, punctuation, formatting, commands, shapes, snippets and replacements.
+
+### Local Ollama interface
+
+The daemon can talk to an Ollama server on this machine. Nothing uses it yet — it
+is the transport the LLM features will be built on — but the interface is here so
+the next step is a prompt and a policy, not an HTTP client.
+
+- `ollama_url = "http://127.0.0.1:11434"` — the base URL. The client accepts only
+  `127.0.0.1`, `localhost` or `::1`; a LAN or cloud host is an error, so there is
+  no configuration that turns this into a network client.
+- `ollama_model = ""` — the default model. Empty means a command must name one;
+  nothing is chosen silently.
+- `ollama_timeout_seconds = 30` — how long a request waits before it is abandoned.
+
+Three commands exercise the interface against the live server:
+
+```bash
+hippo-dictate ollama version
+hippo-dictate ollama models
+hippo-dictate ollama run llama3.2 "Rewrite this sentence more plainly."
+```
+
+`curl` is the transport, for the same reason `model download` uses it: it is
+already a runtime dependency, and Ollama's API is plain JSON over HTTP. Requests
+ask for `"stream": false`, so a call returns one document. The client covers
+`GET /api/version`, `GET /api/tags`, `POST /api/generate` and `POST /api/chat`.
+
+The loopback check is on the server, not the model: Ollama's own cloud models are
+reachable through a local server, and the client cannot tell one from a model on
+disk. Keep `ollama_model` pointing at a model that is actually local until the
+feature that uses it can say otherwise.
 
 Hotkeys are the exception: the Windows daemon registers its chords at startup, so
 a new chord needs a restart. Nothing else does.

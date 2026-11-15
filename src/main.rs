@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -13,6 +13,7 @@ use hippo_dictate::inject;
 use hippo_dictate::licence::{self, Tier};
 use hippo_dictate::log;
 use hippo_dictate::model;
+use hippo_dictate::ollama;
 #[cfg(target_os = "linux")]
 use hippo_dictate::popup;
 use hippo_dictate::sherpa::Sherpa;
@@ -75,6 +76,21 @@ enum LicenceCommand {
 }
 
 #[derive(Subcommand)]
+enum OllamaCommand {
+    /// Print the local server's version.
+    Version,
+    /// List the models the local server has installed.
+    Models,
+    /// Run one prompt and print the completion.
+    Run {
+        /// Model name, e.g. `llama3.2`. Defaults to `ollama_model`.
+        model: Option<String>,
+        /// The prompt, as one argument. Quote it.
+        prompt: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum Command {
     /// Report what the app can see, and what is missing.
     Doctor,
@@ -123,6 +139,11 @@ enum Command {
         #[arg(long)]
         search: Option<String>,
     },
+    /// Talk to a local Ollama server. Nothing is sent off this machine.
+    Ollama {
+        #[command(subcommand)]
+        command: OllamaCommand,
+    },
     /// Inspect, verify or fetch the speech model.
     Model {
         #[command(subcommand)]
@@ -161,6 +182,7 @@ fn main() -> Result<()> {
             device,
         } => record(&out, seconds, device.as_deref()),
         Command::Daemon => daemon::run_process(),
+        Command::Ollama { command } => ollama_command(command),
         Command::Model { command } => model_command(command),
         Command::Licence { command } => licence_command(command),
         Command::Text { words } => {
@@ -526,6 +548,47 @@ fn doctor() -> Result<()> {
         println!("paste         built in (SendInput)");
         println!("hotkey        {}", config.hotkey);
         println!("cue player    not implemented on Windows yet");
+    }
+    Ok(())
+}
+
+fn ollama_command(command: OllamaCommand) -> Result<()> {
+    let config = Config::load()?;
+    let client = ollama::Client::with_timeout(
+        &config.ollama_url,
+        Duration::from_secs(config.ollama_timeout_seconds.max(1)),
+    )?;
+    match command {
+        OllamaCommand::Version => {
+            println!("{}", client.version()?);
+        }
+        OllamaCommand::Models => {
+            let models = client.models()?;
+            if models.is_empty() {
+                println!("no models installed");
+            } else {
+                for name in models {
+                    println!("{name}");
+                }
+            }
+        }
+        OllamaCommand::Run { model, prompt } => {
+            let model = model
+                .filter(|model| !model.trim().is_empty())
+                .or_else(|| {
+                    (!config.ollama_model.trim().is_empty()).then(|| config.ollama_model.clone())
+                })
+                .context("ollama: pass a model, or set `ollama_model` in config.toml")?;
+            let prompt = prompt.join(" ");
+            if prompt.trim().is_empty() {
+                bail!("ollama: the prompt is empty");
+            }
+            let reply = client.generate(&model, &prompt)?;
+            print!("{reply}");
+            if !reply.ends_with('\n') {
+                println!();
+            }
+        }
     }
     Ok(())
 }

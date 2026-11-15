@@ -16,6 +16,7 @@ pub mod inject;
 pub mod licence;
 pub mod log;
 pub mod model;
+pub mod ollama;
 #[cfg(windows)]
 pub mod overlay;
 #[cfg(target_os = "linux")]

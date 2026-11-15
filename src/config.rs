@@ -293,6 +293,17 @@ pub struct Config {
     pub snippets: Vec<Snippet>,
     /// Whole-word substitutions, applied last.
     pub replacements: Vec<Replacement>,
+    /// Base URL of a local Ollama server for LLM work.
+    ///
+    /// Loopback only: the client refuses any host that is not this machine, so
+    /// this is a port and a scheme rather than an escape hatch to a cloud
+    /// service. The app makes no other network call after the model download.
+    pub ollama_url: String,
+    /// Default model for the Ollama commands. Empty means the caller must name
+    /// one; nothing is chosen silently.
+    pub ollama_model: String,
+    /// Seconds to wait for an Ollama response before abandoning the request.
+    pub ollama_timeout_seconds: u64,
 }
 
 impl Default for Config {
@@ -325,6 +336,9 @@ impl Default for Config {
             commands: true,
             snippets: Vec::new(),
             replacements: Vec::new(),
+            ollama_url: "http://127.0.0.1:11434".to_string(),
+            ollama_model: String::new(),
+            ollama_timeout_seconds: 30,
         }
     }
 }
@@ -387,6 +401,8 @@ mod tests {
         let back: Config = toml::from_str(&text).expect("deserialize");
         assert_eq!(back.chunk_seconds, config.chunk_seconds);
         assert_eq!(back.paste, config.paste);
+        assert_eq!(back.ollama_url, config.ollama_url);
+        assert_eq!(back.ollama_timeout_seconds, config.ollama_timeout_seconds);
         assert_eq!(PasteMethod::from_arg("ydotool"), Some(PasteMethod::Ydotool));
     }
 
