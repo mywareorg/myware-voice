@@ -61,23 +61,32 @@ fn shape_of(text: &str, rules: &[crate::config::CommandRule]) -> (String, Option
         return (text.to_string(), None);
     }
     for rule in rules {
-        let say = rule.say.trim().to_lowercase();
-        if say.is_empty() {
-            continue;
+        for say in alternatives(&rule.say) {
+            let suffix = format!(" {}", say.to_lowercase());
+            if !lower.ends_with(&suffix) {
+                continue;
+            }
+            let shape = match rule.action.trim().to_lowercase().as_str() {
+                "bullets" => Shape::Bullets,
+                "one line" => Shape::OneLine,
+                _ => continue,
+            };
+            let cut = text.len() - suffix.len();
+            return (text[..cut].trim_end().to_string(), Some(shape));
         }
-        let suffix = format!(" {say}");
-        if !lower.ends_with(&suffix) {
-            continue;
-        }
-        let shape = match rule.action.trim().to_lowercase().as_str() {
-            "bullets" => Shape::Bullets,
-            "one line" => Shape::OneLine,
-            _ => continue,
-        };
-        let cut = text.len() - suffix.len();
-        return (text[..cut].trim_end().to_string(), Some(shape));
     }
     (text.to_string(), None)
+}
+
+/// The phrases one rule matches: `say`, `from` or `trigger` may name several,
+/// comma-separated.
+///
+/// "exclamation mark, exclamation point" is one rule with two ways to say it,
+/// which is how the default tables are written. A comma is therefore a
+/// separator and not a literal; the punctuation table spells the mark "comma"
+/// for that reason, and the settings window says so.
+fn alternatives(field: &str) -> impl Iterator<Item = &str> {
+    field.split(',').map(str::trim).filter(|part| !part.is_empty())
 }
 
 /// One bullet per sentence, split after terminal punctuation.
@@ -180,15 +189,19 @@ fn clean(raw: &str, config: &Config) -> String {
 }
 
 fn punctuation(text: &str, rules: &[crate::config::SpokenRule]) -> String {
-    // Longest phrase first, so "question mark" wins over a rule for "mark".
-    let mut ordered: Vec<&crate::config::SpokenRule> = rules.iter().collect();
-    ordered.sort_by_key(|rule| std::cmp::Reverse(rule.say.trim().len()));
+    // Longest phrase first, so "question mark" wins over a rule for "mark". Each
+    // comma-separated alternative is its own phrase: one rule can name several
+    // ways to say the same mark.
+    let mut phrases: Vec<(&str, &str)> = rules
+        .iter()
+        .flat_map(|rule| {
+            alternatives(&rule.say).map(move |say| (say, rule.becomes.as_str()))
+        })
+        .collect();
+    phrases.sort_by_key(|(say, _)| std::cmp::Reverse(say.len()));
     let mut out = text.to_string();
-    for rule in ordered {
-        if rule.say.trim().is_empty() {
-            continue;
-        }
-        out = substitute(&out, &rule.say, &rule.becomes, true);
+    for (say, becomes) in phrases {
+        out = substitute(&out, say, becomes, true);
     }
     tidy(&out)
 }
@@ -196,10 +209,9 @@ fn punctuation(text: &str, rules: &[crate::config::SpokenRule]) -> String {
 fn formatting(text: &str, rules: &[crate::config::SpokenRule]) -> String {
     let mut out = text.to_string();
     for rule in rules {
-        if rule.say.trim().is_empty() {
-            continue;
+        for say in alternatives(&rule.say) {
+            out = substitute(&out, say, &rule.becomes, true);
         }
-        out = substitute(&out, &rule.say, &rule.becomes, true);
     }
     tighten(&out, &['@'])
 }
@@ -207,10 +219,9 @@ fn formatting(text: &str, rules: &[crate::config::SpokenRule]) -> String {
 fn replace(text: &str, config: &Config) -> String {
     let mut out = text.to_string();
     for rule in &config.replacements {
-        if rule.from.trim().is_empty() {
-            continue;
+        for from in alternatives(&rule.from) {
+            out = substitute(&out, from, &rule.to, false);
         }
-        out = substitute(&out, &rule.from, &rule.to, false);
     }
     out
 }
@@ -219,7 +230,7 @@ fn replace(text: &str, config: &Config) -> String {
 fn command_for(text: &str, rules: &[crate::config::CommandRule]) -> Option<Command> {
     let said = normalise(text);
     for rule in rules {
-        if rule.say.trim().is_empty() || normalise(&rule.say) != said {
+        if !alternatives(&rule.say).any(|say| normalise(say) == said) {
             continue;
         }
         return match rule.action.trim().to_lowercase().as_str() {
@@ -238,7 +249,9 @@ fn snippet_for<'a>(text: &str, config: &'a Config) -> Option<&'a str> {
     config
         .snippets
         .iter()
-        .find(|snippet| !snippet.trigger.trim().is_empty() && normalise(&snippet.trigger) == wanted)
+        .find(|snippet| {
+            alternatives(&snippet.trigger).any(|trigger| normalise(trigger) == wanted)
+        })
         .map(|snippet| snippet.text.as_str())
 }
 
@@ -592,6 +605,71 @@ mod tests {
             text("first. second. as points", &config),
             "\u{2022} first.\n\u{2022} second."
         );
+    }
+
+    #[test]
+    fn a_comma_in_the_matching_field_names_alternatives() {
+        use crate::config::{CommandRule, Replacement, Snippet, SpokenRule};
+        let mut config = config();
+
+        config.punctuation_commands = true;
+        config.punctuation = vec![SpokenRule {
+            say: "bang, exclamation mark".to_string(),
+            becomes: "! ".to_string(),
+        }];
+        assert_eq!(text("one bang two", &config), "one! two");
+        assert_eq!(text("one exclamation mark two", &config), "one! two");
+
+        config.formatting_rules = vec![SpokenRule {
+            say: "at, atsign".to_string(),
+            becomes: "@".to_string(),
+        }];
+        assert_eq!(text("sean atsign example", &config), "sean@example");
+
+        config.command_rules = vec![CommandRule {
+            say: "scratch that, never mind".to_string(),
+            action: "discard".to_string(),
+        }];
+        assert_eq!(
+            apply("never mind", &config),
+            Outcome::Command(Command::Discard)
+        );
+
+        config.shape_rules = vec![CommandRule {
+            say: "as a list, as bullets".to_string(),
+            action: "bullets".to_string(),
+        }];
+        assert_eq!(
+            text("one. two. as bullets", &config),
+            "\u{2022} one.\n\u{2022} two."
+        );
+
+        config.snippets = vec![Snippet {
+            trigger: "my link, my calendar".to_string(),
+            text: "https://cal.example".to_string(),
+        }];
+        assert_eq!(text("my calendar", &config), "https://cal.example");
+
+        config.replacements = vec![Replacement {
+            from: "hippo, hipo".to_string(),
+            to: "Hippo".to_string(),
+        }];
+        assert_eq!(text("call hipo now", &config), "call Hippo now");
+    }
+
+    #[test]
+    fn the_output_side_of_a_rule_is_never_split() {
+        use crate::config::SpokenRule;
+        let mut config = config();
+        config.punctuation_commands = true;
+        // "comma" is a spoken name, not a separator here, and the replacement it
+        // produces contains a comma and a space.
+        assert_eq!(text("hello comma world", &config), "hello, world");
+        config.punctuation = vec![SpokenRule {
+            say: "ellipsis".to_string(),
+            becomes: "a, b".to_string(),
+        }];
+        assert_eq!(text("wait ellipsis now", &config), "wait a, b now");
     }
 
     #[test]

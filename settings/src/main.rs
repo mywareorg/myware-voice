@@ -17,6 +17,7 @@ use hippo_ui::buttons::{icon_colored, labelled};
 use hippo_ui::rows::{settings_divider, settings_row, switch_row};
 use hippo_ui::styles::*;
 use hippo_ui::tokens::{self, AppTheme, Scheme};
+use iced::keyboard::{key::Named, Key, Modifiers};
 use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{font, Element, Font, Length, Task};
 use std::sync::OnceLock;
@@ -160,6 +161,10 @@ enum Message {
     Refresh,
     /// A pane request arrived from another instance.
     PollRequest,
+    /// Tab moved the text cursor to the next field.
+    FocusNext,
+    /// Shift+Tab moved it back.
+    FocusPrevious,
     Copy(usize),
     ClearHistory,
     Save,
@@ -272,16 +277,27 @@ impl Settings {
         // A second instance writes the request file and exits, so the open window
         // polls for it. Cheap: one `stat` and one read every 400 ms, and only
         // while a window is open at all.
-        iced::time::every(Duration::from_millis(400)).map(|_| Message::PollRequest)
+        let poll = iced::time::every(Duration::from_millis(400)).map(|_| Message::PollRequest);
+        // `text_input` reports Tab as ignored rather than swallowing it, so the
+        // subscription still sees the press while a field has focus.
+        let focus = iced::keyboard::on_key_press(tab_key);
+        iced::Subscription::batch([poll, focus])
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
-        if !matches!(message, Message::Save) {
+        // A tab is not an edit, so it must not clear the "Saved" line the way
+        // typing does.
+        if !matches!(
+            message,
+            Message::Save | Message::FocusNext | Message::FocusPrevious
+        ) {
             self.saved = false;
         }
         self.copied = None;
 
         match message {
+            Message::FocusNext => return iced::widget::focus_next(),
+            Message::FocusPrevious => return iced::widget::focus_previous(),
             Message::Pane(pane) => self.pane = pane,
             Message::Device(name) => {
                 self.config.device = (name != SYSTEM_DEFAULT).then_some(name);
@@ -1161,35 +1177,35 @@ impl Settings {
             add_button("Add filler", RuleList::Fillers, scheme),
             settings_divider(scheme),
             section("Spoken punctuation", scheme),
-            text("What to say, and the characters it becomes. A trailing space is part of the replacement, and \\n is a line break.")
+            text("Commas split alternatives; the right field is inserted as written. A trailing space counts, and \\n is a line break.")
                 .size(tokens::TEXT_XS)
                 .color(scheme.muted),
             rule_rows(RuleList::Punctuation, &punctuation, "comma", ", ", true, scheme),
             add_button("Add punctuation", RuleList::Punctuation, scheme),
             settings_divider(scheme),
             section("Spoken formatting", scheme),
-            text("Addresses: what to say, and what it becomes.")
+            text("Addresses: what to say, and what it becomes. Commas separate alternatives; the right field is inserted as written.")
                 .size(tokens::TEXT_XS)
                 .color(scheme.muted),
             rule_rows(RuleList::Formatting, &formatting, "at sign", "@", true, scheme),
             add_button("Add formatting", RuleList::Formatting, scheme),
             settings_divider(scheme),
             section("Voice commands", scheme),
-            text("Said as the whole utterance. Action is discard or quit.")
+            text("Said as the whole utterance. Commas separate alternatives; the action is discard or quit, taken as written.")
                 .size(tokens::TEXT_XS)
                 .color(scheme.muted),
             rule_rows(RuleList::Commands, &commands, "scratch that", "discard", true, scheme),
             add_button("Add command", RuleList::Commands, scheme),
             settings_divider(scheme),
             section("Trailing shapes", scheme),
-            text("Said at the end of an utterance. Action is bullets or one line.")
+            text("Said at the end of an utterance. A comma offers alternatives; the action is bullets or one line, taken as written.")
                 .size(tokens::TEXT_XS)
                 .color(scheme.muted),
             rule_rows(RuleList::Shapes, &shapes, "as a list", "bullets", true, scheme),
             add_button("Add shape", RuleList::Shapes, scheme),
             settings_divider(scheme),
             section("Snippets", scheme),
-            text("Say the trigger as the whole utterance and the text replaces it.")
+            text("Whole utterance for the trigger, then the text replaces it. A comma separates triggers; the text goes in as written.")
                 .size(tokens::TEXT_XS)
                 .color(scheme.muted),
             snippets,
@@ -1198,7 +1214,7 @@ impl Settings {
                 .style(segment_button(scheme, false, false, false)),
             settings_divider(scheme),
             section("Replacements", scheme),
-            text("Whole words, case-insensitive, applied after everything else.")
+            text("Whole words, case-insensitive, applied last. A comma splits the heard side; the right field is inserted as written.")
                 .size(tokens::TEXT_XS)
                 .color(scheme.muted),
             replacements,
@@ -1321,6 +1337,20 @@ impl Settings {
         .spacing(tokens::SPACE_MD)
         .width(Length::Fill)
         .into()
+    }
+}
+
+/// Tab moves the cursor between fields, both ways.
+///
+/// iced's `text_input` leaves Tab to the application: it returns the event
+/// unrecognised and inserts nothing, because a named key is never taken as text
+/// (and a control character from the platform's `text` is filtered, so even a
+/// platform that offers `\t` cannot put one in the field).
+fn tab_key(key: Key, modifiers: Modifiers) -> Option<Message> {
+    match key {
+        Key::Named(Named::Tab) if modifiers.shift() => Some(Message::FocusPrevious),
+        Key::Named(Named::Tab) => Some(Message::FocusNext),
+        _ => None,
     }
 }
 

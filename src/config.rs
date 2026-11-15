@@ -59,6 +59,9 @@ impl PasteMethod {
 }
 
 /// A phrase that expands to fixed text when it is the whole utterance.
+///
+/// `trigger` may hold several phrases separated by commas; any of them expands
+/// to `text`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snippet {
     pub trigger: String,
@@ -66,6 +69,8 @@ pub struct Snippet {
 }
 
 /// A whole-word substitution: a name, an acronym, a correction.
+///
+/// `from` may hold several phrases separated by commas; each is replaced by `to`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Replacement {
     pub from: String,
@@ -75,9 +80,11 @@ pub struct Replacement {
 /// A spoken form and what it becomes.
 ///
 /// `say` is matched whole-word and case-insensitively; `becomes` is inserted
-/// verbatim, so a rule that wants a following space carries it. These are the
-/// tables the text pass uses, and they are in the config file so a user can see
-/// every rule and change any of them.
+/// verbatim, so a rule that wants a following space carries it. A comma in `say`
+/// separates alternatives, all of which produce the same `becomes`, which is why
+/// the defaults read "exclamation mark, exclamation point". `becomes` is never
+/// split. These are the tables the text pass uses, and they are in the config
+/// file so a user can see every rule and change any of them.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpokenRule {
     pub say: String,
@@ -86,9 +93,10 @@ pub struct SpokenRule {
 
 /// A whole-utterance instruction: what to say, and what to do about it.
 ///
-/// `action` is one of `discard`, `quit`, `bullets`, `one line`. An action this
-/// build does not know is ignored rather than treated as text, which is how a
-/// config from a newer version degrades.
+/// `say` may hold several phrases separated by commas, any of which fires the
+/// action. `action` is one of `discard`, `quit`, `bullets`, `one line`. An action
+/// this build does not know is ignored rather than treated as text, which is how
+/// a config from a newer version degrades.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandRule {
     pub say: String,
@@ -103,21 +111,20 @@ fn default_fillers() -> Vec<String> {
 }
 
 fn default_punctuation() -> Vec<SpokenRule> {
-    const TABLE: [(&str, &str); 16] = [
+    // One row per mark; the comma-separated spellings are alternatives for the
+    // same `becomes`, which is why "exclamation point" is not a second rule.
+    const TABLE: [(&str, &str); 13] = [
         ("open parenthesis", "("),
         ("close parenthesis", ")"),
-        ("exclamation mark", "! "),
-        ("exclamation point", "! "),
+        ("exclamation mark, exclamation point", "! "),
         ("question mark", "? "),
         ("new paragraph", "\n\n"),
         ("new line", "\n"),
-        ("full stop", ". "),
-        ("open quote", "\""),
-        ("close quote", "\""),
+        ("full stop, period", ". "),
+        ("open quote, close quote", "\""),
         ("semicolon", "; "),
         ("hyphen", "-"),
         ("comma", ", "),
-        ("period", ". "),
         ("colon", ": "),
         ("dash", " - "),
     ];
@@ -147,15 +154,12 @@ fn default_formatting() -> Vec<SpokenRule> {
 }
 
 fn default_commands() -> Vec<CommandRule> {
-    const TABLE: [(&str, &str); 8] = [
-        ("scratch that", "discard"),
-        ("cancel that", "discard"),
-        ("discard that", "discard"),
-        ("never mind", "discard"),
-        ("nevermind", "discard"),
-        ("quit hippo", "quit"),
-        ("hippo quit", "quit"),
-        ("hippo stop", "quit"),
+    const TABLE: [(&str, &str); 2] = [
+        (
+            "scratch that, cancel that, discard that, never mind, nevermind",
+            "discard",
+        ),
+        ("quit hippo, hippo quit, hippo stop", "quit"),
     ];
     TABLE
         .iter()
@@ -167,11 +171,9 @@ fn default_commands() -> Vec<CommandRule> {
 }
 
 fn default_shapes() -> Vec<CommandRule> {
-    const TABLE: [(&str, &str); 4] = [
-        ("as a list", "bullets"),
-        ("as bullets", "bullets"),
-        ("on one line", "one line"),
-        ("as one line", "one line"),
+    const TABLE: [(&str, &str); 2] = [
+        ("as a list, as bullets", "bullets"),
+        ("on one line, as one line", "one line"),
     ];
     TABLE
         .iter()

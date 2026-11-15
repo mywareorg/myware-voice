@@ -217,6 +217,20 @@ any of it — and the window's **Text** tab edits the same rows.
   whole-utterance match.
 - `[[replacements]]` — whole-word, case-insensitive substitutions, applied last.
 
+Every matching field — `say`, `trigger`, `from` — takes a comma-separated list of
+alternatives, all of which produce the same result:
+
+```toml
+[[punctuation]]
+say = "exclamation mark, exclamation point"
+becomes = "! "
+```
+
+That is the shipped shape: one row per mark, one row per action, rather than one
+row per spelling. A comma is therefore a separator and not a literal, which is
+why the mark is spelled `comma`; the output side (`becomes`, `text`, `to`) is
+inserted as written and is never split.
+
 The punctuation characters are **pasted, not typed**: a newline inside a
 transcript is a newline inside the clipboard payload, and for a terminal the
 payload is flattened to one line, so a paragraph break can never execute the
@@ -228,7 +242,7 @@ punctuation_commands = true
 # The shipped table is long; a config only needs the rows it changes when it
 # replaces the whole table, so copy the defaults before editing them.
 [[punctuation]]
-say = "semi"
+say = "semi, semicolon"
 becomes = "; "
 
 [[command_rules]]
