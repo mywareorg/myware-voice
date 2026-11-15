@@ -22,6 +22,7 @@ pub mod overlay;
 #[cfg(target_os = "linux")]
 pub mod popup;
 pub mod sherpa;
+pub mod suggest;
 pub mod text;
 pub mod tone;
 pub mod transport;

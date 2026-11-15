@@ -262,15 +262,22 @@ fillers, punctuation, formatting, commands, shapes, snippets and replacements.
 
 ### Local Ollama interface
 
-The daemon can talk to an Ollama server on this machine. Nothing uses it yet — it
-is the transport the LLM features will be built on — but the interface is here so
-the next step is a prompt and a policy, not an HTTP client.
+The daemon can talk to an Ollama server on this machine. The one feature built on
+it is **suggested rules**: the settings window reads your dictation history, asks
+the local model which corrections you keep making by hand, and offers them as
+replacement and snippet rules. You accept or dismiss each row; nothing is applied
+without a click, and the model is never in the path of a paste.
+
+Turn on **Keep history** first — the suggestions are drawn from `history.tsv` and
+nothing leaves the machine. The window uses `ollama_model` when it is set and
+otherwise takes the first model the server lists.
 
 - `ollama_url = "http://127.0.0.1:11434"` — the base URL. The client accepts only
   `127.0.0.1`, `localhost` or `::1`; a LAN or cloud host is an error, so there is
   no configuration that turns this into a network client.
-- `ollama_model = ""` — the default model. Empty means a command must name one;
-  nothing is chosen silently.
+- `ollama_model = ""` — the default model. Empty means a command must name one,
+  and the suggestion run picks the first installed model; nothing is chosen
+  silently.
 - `ollama_timeout_seconds = 30` — how long a request waits before it is abandoned.
 
 Three commands exercise the interface against the live server:
@@ -283,8 +290,11 @@ hippo-dictate ollama run llama3.2 "Rewrite this sentence more plainly."
 
 `curl` is the transport, for the same reason `model download` uses it: it is
 already a runtime dependency, and Ollama's API is plain JSON over HTTP. Requests
-ask for `"stream": false`, so a call returns one document. The client covers
-`GET /api/version`, `GET /api/tags`, `POST /api/generate` and `POST /api/chat`.
+ask for `"stream": false`, so a call returns one document. The suggestion run
+also sends `"format": "json"`, which the server enforces as a grammar; the reply
+is still parsed defensively, and a malformed row is dropped rather than failing
+the batch. The client covers `GET /api/version`, `GET /api/tags`,
+`POST /api/generate` and `POST /api/chat`.
 
 The loopback check is on the server, not the model: Ollama's own cloud models are
 reachable through a local server, and the client cannot tell one from a model on

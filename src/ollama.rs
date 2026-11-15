@@ -144,11 +144,27 @@ impl Client {
 
     /// Run one prompt through a model and return the completion.
     pub fn generate(&self, model: &str, prompt: &str) -> Result<String> {
+        self.generate_with(model, prompt, None)
+    }
+
+    /// Run one prompt and require the completion to be JSON.
+    ///
+    /// `format: "json"` is Ollama's own constraint, not a request in the prompt:
+    /// the server keeps the model inside a JSON grammar, which is the difference
+    /// between a reply that parses every time and one that parses most of the
+    /// time. The caller still parses defensively.
+    pub fn generate_json(&self, model: &str, prompt: &str) -> Result<String> {
+        self.generate_with(model, prompt, Some("json"))
+    }
+
+    fn generate_with(&self, model: &str, prompt: &str, format: Option<&str>) -> Result<String> {
         #[derive(Serialize)]
         struct Request<'a> {
             model: &'a str,
             prompt: &'a str,
             stream: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            format: Option<&'a str>,
         }
         #[derive(Deserialize)]
         struct Reply {
@@ -160,6 +176,7 @@ impl Client {
             model,
             prompt,
             stream: false,
+            format,
         })
         .context("ollama: encode /api/generate request")?;
         let body = self.request("/api/generate", Some(&request))?;

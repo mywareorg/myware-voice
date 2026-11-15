@@ -10,6 +10,8 @@ use hippo_dictate::chord::Chord;
 use hippo_dictate::config::{Clipboard, Config, PasteMethod};
 use hippo_dictate::history;
 use hippo_dictate::model;
+use hippo_dictate::ollama;
+use hippo_dictate::suggest::{self, Kind, Proposal};
 use hippo_dictate::text as rules;
 use hippo_ui::buttons::{icon_colored, labelled};
 use hippo_ui::rows::{settings_divider, settings_row, switch_row};
@@ -150,6 +152,11 @@ enum Message {
     ReplacementTo(usize, String),
     AddReplacement,
     RemoveReplacement(usize),
+    /// Ask the local model for rules the history suggests.
+    SuggestStart,
+    SuggestDone(Result<Vec<Proposal>, String>),
+    AcceptSuggestion(usize),
+    DismissSuggestion(usize),
     Refresh,
     /// A pane request arrived from another instance.
     PollRequest,
@@ -176,6 +183,16 @@ struct Settings {
     hotkey_error: Option<String>,
     stream_draft: String,
     stream_error: Option<String>,
+    /// Rules the local model proposed after reading the history. Not the config:
+    /// nothing here is a rule until a row is accepted, and not saved until Save.
+    suggestions: Vec<Proposal>,
+    suggest_status: Option<String>,
+    suggesting: bool,
+    /// Distinguishes "not asked yet" from "asked and nothing came back", which is
+    /// what decides whether the empty result line is drawn.
+    suggest_done: bool,
+    /// A failed suggestion is not a failed config, so it does not share `error`.
+    suggest_error: Option<String>,
 }
 
 impl Settings {
@@ -241,6 +258,11 @@ impl Settings {
                 history_filter: String::new(),
                 error: config_error,
                 model_state,
+                suggestions: Vec::new(),
+                suggest_status: None,
+                suggesting: false,
+                suggest_done: false,
+                suggest_error: None,
             },
             Task::none(),
         )
@@ -367,6 +389,91 @@ impl Settings {
             Message::RemoveReplacement(index) => {
                 if index < self.config.replacements.len() {
                     self.config.replacements.remove(index);
+                }
+            }
+            Message::SuggestStart => {
+                self.suggest_status = None;
+                self.suggest_error = None;
+                self.suggesting = true;
+                self.suggest_done = false;
+                self.suggestions.clear();
+
+                // `suggest` spawns `curl` and blocks, so it runs on a plain
+                // thread: the executor thread draws the "Reading…" frame. The
+                // client's own timeout bounds the wait, so the channel cannot
+                // stay open forever.
+                let config = self.config.clone();
+                return Task::perform(
+                    async move {
+                        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                        std::thread::spawn(move || {
+                            let _ = sender.send(run_suggest(&config));
+                        });
+                        receiver.await.unwrap_or_else(|_| {
+                            Err("suggest: the worker stopped without a result".to_string())
+                        })
+                    },
+                    Message::SuggestDone,
+                );
+            }
+            Message::SuggestDone(result) => {
+                self.suggesting = false;
+                self.suggest_done = true;
+                match result {
+                    Ok(proposals) => {
+                        self.suggestions = proposals;
+                        self.suggest_status = None;
+                        self.suggest_error = None;
+                    }
+                    Err(message) => {
+                        self.suggestions.clear();
+                        self.suggest_error = Some(message);
+                    }
+                }
+            }
+            Message::AcceptSuggestion(index) => {
+                if index < self.suggestions.len() {
+                    let proposal = self.suggestions.remove(index);
+                    // The filter upstream already drops what the config covers,
+                    // but the config can change between the run and the click.
+                    let exists = match proposal.kind {
+                        Kind::Replacement => self
+                            .config
+                            .replacements
+                            .iter()
+                            .any(|rule| rule.from.eq_ignore_ascii_case(&proposal.say)),
+                        Kind::Snippet => self
+                            .config
+                            .snippets
+                            .iter()
+                            .any(|snippet| snippet.trigger.eq_ignore_ascii_case(&proposal.say)),
+                    };
+                    if exists {
+                        self.suggest_status = Some("Already a rule here — nothing added.".to_string());
+                    } else {
+                        match proposal.kind {
+                            Kind::Replacement => {
+                                self.config
+                                    .replacements
+                                    .push(hippo_dictate::config::Replacement {
+                                        from: proposal.say,
+                                        to: proposal.becomes,
+                                    })
+                            }
+                            Kind::Snippet => {
+                                self.config.snippets.push(hippo_dictate::config::Snippet {
+                                    trigger: proposal.say,
+                                    text: proposal.becomes,
+                                })
+                            }
+                        }
+                        self.suggest_status = Some("Added \u{2014} Save to apply.".to_string());
+                    }
+                }
+            }
+            Message::DismissSuggestion(index) => {
+                if index < self.suggestions.len() {
+                    self.suggestions.remove(index);
                 }
             }
             Message::Refresh => self.entries = load_entries(&self.config),
@@ -871,6 +978,124 @@ impl Settings {
             );
         }
 
+        // Proposals from the local model. The list is state, not config: a row
+        // becomes a rule only when it is accepted, and only Save writes it.
+        let mut suggested: iced::widget::Column<'_, Message> =
+            column![].spacing(tokens::SPACE_MD).width(Length::Fill);
+        if !self.config.history {
+            suggested = suggested.push(
+                text("Turn on \u{201c}Keep history\u{201d} to use this.")
+                    .size(tokens::TEXT_XS)
+                    .color(scheme.muted),
+            );
+        } else {
+            suggested = suggested
+                .push(section("Suggested rules", scheme))
+                .push(
+                    text("Read your history with the local model and propose rules you keep correcting by hand.")
+                        .size(tokens::TEXT_XS)
+                        .color(scheme.muted),
+                );
+            // No `on_press` while running: a second `curl` in flight would answer
+            // a question the window has moved past.
+            let suggest_button = button(text("Suggest rules").size(tokens::TEXT_SM))
+                .style(segment_button(scheme, false, false, false));
+            let suggest_button = if self.suggesting {
+                suggest_button
+            } else {
+                suggest_button.on_press(Message::SuggestStart)
+            };
+            suggested = suggested.push(suggest_button);
+            if !self.config.ollama_model.trim().is_empty() {
+                suggested = suggested.push(
+                    text(format!("using {}", self.config.ollama_model))
+                        .size(tokens::TEXT_XS)
+                        .color(scheme.muted),
+                );
+            }
+            if self.suggesting {
+                suggested = suggested.push(
+                    text("Reading your history\u{2026}")
+                        .size(tokens::TEXT_XS)
+                        .color(scheme.muted),
+                );
+            } else {
+                if let Some(error) = &self.suggest_error {
+                    suggested = suggested.push(
+                        text(error.as_str())
+                            .size(tokens::TEXT_XS)
+                            .color(scheme.danger),
+                    );
+                }
+                if !self.suggestions.is_empty() {
+                    let mut rows: iced::widget::Column<'_, Message> =
+                        column![].spacing(tokens::SPACE_2XS).width(Length::Fill);
+                    for (index, proposal) in self.suggestions.iter().enumerate() {
+                        rows = rows.push(
+                            row![
+                                column![
+                                    text(proposal.kind.arg())
+                                        .size(tokens::TEXT_XS)
+                                        .color(scheme.muted),
+                                    row![
+                                        text(proposal.say.as_str())
+                                            .size(tokens::TEXT_SM)
+                                            .color(scheme.text),
+                                        text("\u{2192}")
+                                            .size(tokens::TEXT_SM)
+                                            .color(scheme.muted),
+                                        text(proposal.becomes.as_str())
+                                            .size(tokens::TEXT_SM)
+                                            .color(scheme.text),
+                                    ]
+                                    .spacing(tokens::SPACE_2XS)
+                                    .align_y(iced::Alignment::Center),
+                                    text(proposal.reason.as_str())
+                                        .size(tokens::TEXT_XS)
+                                        .color(scheme.muted),
+                                ]
+                                .spacing(tokens::SPACE_2XS)
+                                .width(Length::Fill),
+                                button(icon_colored(
+                                    hippo_ui::ICON_CHECK,
+                                    tokens::TEXT_SM,
+                                    scheme.text
+                                ))
+                                .on_press(Message::AcceptSuggestion(index))
+                                .style(segment_button(scheme, false, false, false)),
+                                button(icon_colored(
+                                    hippo_ui::ICON_CLOSE,
+                                    tokens::TEXT_SM,
+                                    scheme.text
+                                ))
+                                .on_press(Message::DismissSuggestion(index))
+                                .style(segment_button(scheme, false, false, false)),
+                            ]
+                            .spacing(tokens::SPACE_SM)
+                            .align_y(iced::Alignment::Center),
+                        );
+                    }
+                    suggested = suggested.push(rows);
+                } else if self.suggest_done
+                    && self.suggest_error.is_none()
+                    && self.suggest_status.is_none()
+                {
+                    suggested = suggested.push(
+                        text("Nothing worth adding \u{2014} the rules already cover what you dictate.")
+                            .size(tokens::TEXT_XS)
+                            .color(scheme.muted),
+                    );
+                }
+                if let Some(status) = &self.suggest_status {
+                    suggested = suggested.push(
+                        text(status.as_str())
+                            .size(tokens::TEXT_XS)
+                            .color(scheme.muted),
+                    );
+                }
+            }
+        }
+
         column![
             text("What happens to a transcript between the decoder and the clipboard. Every rule below is a row you can edit.")
                 .size(tokens::TEXT_SM)
@@ -926,6 +1151,7 @@ impl Settings {
                 scheme,
             ),
             text(preview).size(tokens::TEXT_XS).color(scheme.muted),
+            suggested,
             settings_divider(scheme),
             section("Fillers", scheme),
             text("Removed as whole words while cleanup is on.")
@@ -1266,6 +1492,35 @@ fn add_button<'a>(label: &'a str, list: RuleList, scheme: Scheme) -> Element<'a,
         .on_press(Message::AddRule(list))
         .style(segment_button(scheme, false, false, false))
         .into()
+}
+
+/// The blocking half of `Message::SuggestStart`, run off the executor thread.
+///
+/// The model is whatever the config names; an empty name means the model has
+/// never been picked, so the first thing the server has installed is used rather
+/// than failing with nothing to say.
+fn run_suggest(config: &Config) -> Result<Vec<Proposal>, String> {
+    let client = ollama::Client::with_timeout(
+        &config.ollama_url,
+        Duration::from_secs(config.ollama_timeout_seconds.max(1)),
+    )
+    .map_err(|error| error.to_string())?;
+    let model = if config.ollama_model.trim().is_empty() {
+        let models = client.models().map_err(|error| error.to_string())?;
+        match models.first() {
+            Some(model) => model.clone(),
+            None => {
+                return Err(
+                    "suggest: no models installed on the local server; run `ollama pull <model>`"
+                        .to_string(),
+                )
+            }
+        }
+    } else {
+        config.ollama_model.clone()
+    };
+    suggest::suggest(&client, &model, config.history_days, config)
+        .map_err(|error| error.to_string())
 }
 
 /// A row the user opened and left blank is not a rule: writing it out would leave
