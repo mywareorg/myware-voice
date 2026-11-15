@@ -39,40 +39,6 @@ pub enum Outcome {
     Command(Command),
 }
 
-/// Words that carry no meaning on their own. Conservative: a filler that is
-/// actually part of a sentence ("er" in a name, "ah" in an exclamation) would be
-/// worse to remove than to keep, so only the unambiguous ones are here.
-const FILLERS: &[&str] = &["um", "uh", "uhm", "erm", "hmm", "mhm"];
-
-/// Spoken punctuation, longest phrase first so "question mark" wins over "mark".
-///
-/// The word-like marks carry the following space in their replacement rather than
-/// leaving the tidier to add one: a space after `:` would turn "3:14" into "3: 14",
-/// and the tidier cannot tell a spoken colon from a typed one.
-const PUNCTUATION: &[(&str, &str)] = &[
-    ("open parenthesis", "("),
-    ("close parenthesis", ")"),
-    ("exclamation mark", "! "),
-    ("exclamation point", "! "),
-    ("question mark", "? "),
-    ("new paragraph", "\n\n"),
-    ("new line", "\n"),
-    ("full stop", ". "),
-    ("open quote", "\""),
-    ("close quote", "\""),
-    ("semicolon", "; "),
-    ("hyphen", "-"),
-    ("comma", ", "),
-    ("period", ". "),
-    ("colon", ": "),
-    ("dash", " - "),
-];
-
-/// Top-level domains worth recognising after a spoken "dot".
-const DOMAINS: &[&str] = &[
-    "com", "org", "net", "io", "dev", "ai", "co", "app", "uk", "de",
-];
-
 /// A trailing instruction that reshapes the whole utterance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Shape {
@@ -87,23 +53,29 @@ enum Shape {
 /// Only the suffix is consumed; the words before it are the utterance. Kept
 /// separate from [`apply`] so the transform happens after formatting, where a
 /// newline it inserts is not collapsed again.
-fn shape_of(text: &str) -> (String, Option<Shape>) {
-    const SUFFIXES: [(&str, Shape); 4] = [
-        (" as a list", Shape::Bullets),
-        (" as bullets", Shape::Bullets),
-        (" on one line", Shape::OneLine),
-        (" as one line", Shape::OneLine),
-    ];
+fn shape_of(text: &str, rules: &[crate::config::CommandRule]) -> (String, Option<Shape>) {
     let lower = text.to_lowercase();
-    // The suffixes are ASCII, so this keeps the byte offsets usable on the original.
+    // The suffixes are ASCII in the defaults; a rule with other scripts falls back
+    // to the original text rather than slicing mid-character.
     if lower.len() != text.len() {
         return (text.to_string(), None);
     }
-    for (suffix, shape) in SUFFIXES {
-        if lower.ends_with(suffix) {
-            let cut = text.len() - suffix.len();
-            return (text[..cut].trim_end().to_string(), Some(shape));
+    for rule in rules {
+        let say = rule.say.trim().to_lowercase();
+        if say.is_empty() {
+            continue;
         }
+        let suffix = format!(" {say}");
+        if !lower.ends_with(&suffix) {
+            continue;
+        }
+        let shape = match rule.action.trim().to_lowercase().as_str() {
+            "bullets" => Shape::Bullets,
+            "one line" => Shape::OneLine,
+            _ => continue,
+        };
+        let cut = text.len() - suffix.len();
+        return (text[..cut].trim_end().to_string(), Some(shape));
     }
     (text.to_string(), None)
 }
@@ -134,13 +106,13 @@ fn bullets(text: &str) -> String {
 /// The whole pipeline for one utterance.
 pub fn apply(raw: &str, config: &Config) -> Outcome {
     let cleaned = if config.cleanup {
-        clean(raw)
+        clean(raw, config)
     } else {
         raw.trim().to_string()
     };
 
     if config.commands {
-        if let Some(command) = command_for(&cleaned) {
+        if let Some(command) = command_for(&cleaned, &config.command_rules) {
             return Outcome::Command(command);
         }
     }
@@ -151,15 +123,15 @@ pub fn apply(raw: &str, config: &Config) -> Outcome {
     // A trailing "as a list" is an instruction rather than words to keep, and it
     // travels with voice commands: both are things you say to the app.
     let (mut text, shape) = if config.commands {
-        shape_of(&cleaned)
+        shape_of(&cleaned, &config.shape_rules)
     } else {
         (cleaned, None)
     };
     if config.punctuation_commands {
-        text = punctuation(&text);
+        text = punctuation(&text, &config.punctuation);
     }
     if config.formatting {
-        text = formatting(&text);
+        text = formatting(&text, &config.formatting_rules);
     }
     text = replace(&text, config);
     // Last, so the newlines a shape inserts are not tidied away. A terminal still
@@ -190,33 +162,44 @@ pub fn flatten(text: &str) -> String {
 /// else.
 pub fn cleanup_only(text: &str, config: &Config) -> String {
     if config.cleanup {
-        clean(text)
+        clean(text, config)
     } else {
         text.to_string()
     }
 }
 
-fn clean(raw: &str) -> String {
+fn clean(raw: &str, config: &Config) -> String {
     let mut text = raw.trim().to_string();
-    for filler in FILLERS {
-        text = remove_word(&text, filler);
+    for filler in &config.fillers {
+        if !filler.trim().is_empty() {
+            text = remove_word(&text, filler);
+        }
     }
     text = collapse_repeats(&text);
     tidy(&text)
 }
 
-fn punctuation(text: &str) -> String {
+fn punctuation(text: &str, rules: &[crate::config::SpokenRule]) -> String {
+    // Longest phrase first, so "question mark" wins over a rule for "mark".
+    let mut ordered: Vec<&crate::config::SpokenRule> = rules.iter().collect();
+    ordered.sort_by_key(|rule| std::cmp::Reverse(rule.say.trim().len()));
     let mut out = text.to_string();
-    for (phrase, mark) in PUNCTUATION {
-        out = substitute(&out, phrase, mark, true);
+    for rule in ordered {
+        if rule.say.trim().is_empty() {
+            continue;
+        }
+        out = substitute(&out, &rule.say, &rule.becomes, true);
     }
     tidy(&out)
 }
 
-fn formatting(text: &str) -> String {
-    let mut out = substitute(text, "at sign", "@", true);
-    for domain in DOMAINS {
-        out = substitute(&out, &format!("dot {domain}"), &format!(".{domain}"), true);
+fn formatting(text: &str, rules: &[crate::config::SpokenRule]) -> String {
+    let mut out = text.to_string();
+    for rule in rules {
+        if rule.say.trim().is_empty() {
+            continue;
+        }
+        out = substitute(&out, &rule.say, &rule.becomes, true);
     }
     tighten(&out, &['@'])
 }
@@ -233,14 +216,20 @@ fn replace(text: &str, config: &Config) -> String {
 }
 
 /// Exact-match commands, on the whole utterance.
-fn command_for(text: &str) -> Option<Command> {
-    match normalise(text).as_str() {
-        "scratch that" | "cancel that" | "discard that" | "never mind" | "nevermind" => {
-            Some(Command::Discard)
+fn command_for(text: &str, rules: &[crate::config::CommandRule]) -> Option<Command> {
+    let said = normalise(text);
+    for rule in rules {
+        if rule.say.trim().is_empty() || normalise(&rule.say) != said {
+            continue;
         }
-        "hippo quit" | "quit hippo" | "hippo stop" => Some(Command::Quit),
-        _ => None,
+        return match rule.action.trim().to_lowercase().as_str() {
+            "discard" => Some(Command::Discard),
+            "quit" => Some(Command::Quit),
+            // An action this build does not know is not text to keep either.
+            _ => None,
+        };
     }
+    None
 }
 
 /// A phrase that expands to fixed text, matched on the whole utterance.
@@ -567,6 +556,55 @@ mod tests {
         let mut plain = config();
         plain.commands = false;
         assert_eq!(text("buy milk as a list", &plain), "buy milk as a list");
+    }
+
+    #[test]
+    fn a_rule_edited_in_the_config_is_the_rule_that_runs() {
+        use crate::config::{CommandRule, SpokenRule};
+        let mut config = config();
+
+        // Fillers are a list, and replacing it replaces the behaviour.
+        config.fillers = vec!["basically".to_string()];
+        assert_eq!(text("basically the plan", &config), "the plan");
+        assert_eq!(text("um the plan", &config), "um the plan");
+
+        config.punctuation_commands = true;
+        config.punctuation = vec![SpokenRule {
+            say: "semi".to_string(),
+            becomes: "; ".to_string(),
+        }];
+        assert_eq!(text("one semi two", &config), "one; two");
+
+        config.command_rules = vec![CommandRule {
+            say: "belay that".to_string(),
+            action: "discard".to_string(),
+        }];
+        assert_eq!(
+            apply("belay that", &config),
+            Outcome::Command(Command::Discard)
+        );
+
+        config.shape_rules = vec![CommandRule {
+            say: "as points".to_string(),
+            action: "bullets".to_string(),
+        }];
+        assert_eq!(
+            text("first. second. as points", &config),
+            "\u{2022} first.\n\u{2022} second."
+        );
+    }
+
+    #[test]
+    fn an_unknown_action_is_neither_text_nor_a_command() {
+        use crate::config::CommandRule;
+        let mut config = config();
+        config.command_rules = vec![CommandRule {
+            say: "make it fancy".to_string(),
+            action: "fancy".to_string(),
+        }];
+        // Not a command this build knows, so it stays words on the way to the
+        // pipeline rather than being swallowed.
+        assert!(matches!(apply("make it fancy", &config), Outcome::Text(_)));
     }
 
     #[test]

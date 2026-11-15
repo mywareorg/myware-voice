@@ -72,6 +72,116 @@ pub struct Replacement {
     pub to: String,
 }
 
+/// A spoken form and what it becomes.
+///
+/// `say` is matched whole-word and case-insensitively; `becomes` is inserted
+/// verbatim, so a rule that wants a following space carries it. These are the
+/// tables the text pass uses, and they are in the config file so a user can see
+/// every rule and change any of them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpokenRule {
+    pub say: String,
+    pub becomes: String,
+}
+
+/// A whole-utterance instruction: what to say, and what to do about it.
+///
+/// `action` is one of `discard`, `quit`, `bullets`, `one line`. An action this
+/// build does not know is ignored rather than treated as text, which is how a
+/// config from a newer version degrades.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandRule {
+    pub say: String,
+    pub action: String,
+}
+
+fn default_fillers() -> Vec<String> {
+    ["um", "uh", "uhm", "erm", "hmm", "mhm"]
+        .iter()
+        .map(|word| word.to_string())
+        .collect()
+}
+
+fn default_punctuation() -> Vec<SpokenRule> {
+    const TABLE: [(&str, &str); 16] = [
+        ("open parenthesis", "("),
+        ("close parenthesis", ")"),
+        ("exclamation mark", "! "),
+        ("exclamation point", "! "),
+        ("question mark", "? "),
+        ("new paragraph", "\n\n"),
+        ("new line", "\n"),
+        ("full stop", ". "),
+        ("open quote", "\""),
+        ("close quote", "\""),
+        ("semicolon", "; "),
+        ("hyphen", "-"),
+        ("comma", ", "),
+        ("period", ". "),
+        ("colon", ": "),
+        ("dash", " - "),
+    ];
+    TABLE
+        .iter()
+        .map(|(say, becomes)| SpokenRule {
+            say: say.to_string(),
+            becomes: becomes.to_string(),
+        })
+        .collect()
+}
+
+fn default_formatting() -> Vec<SpokenRule> {
+    let mut rules = vec![SpokenRule {
+        say: "at sign".to_string(),
+        becomes: "@".to_string(),
+    }];
+    for domain in [
+        "com", "org", "net", "io", "dev", "ai", "co", "app", "uk", "de",
+    ] {
+        rules.push(SpokenRule {
+            say: format!("dot {domain}"),
+            becomes: format!(".{domain}"),
+        });
+    }
+    rules
+}
+
+fn default_commands() -> Vec<CommandRule> {
+    const TABLE: [(&str, &str); 8] = [
+        ("scratch that", "discard"),
+        ("cancel that", "discard"),
+        ("discard that", "discard"),
+        ("never mind", "discard"),
+        ("nevermind", "discard"),
+        ("quit hippo", "quit"),
+        ("hippo quit", "quit"),
+        ("hippo stop", "quit"),
+    ];
+    TABLE
+        .iter()
+        .map(|(say, action)| CommandRule {
+            say: say.to_string(),
+            action: action.to_string(),
+        })
+        .collect()
+}
+
+fn default_shapes() -> Vec<CommandRule> {
+    const TABLE: [(&str, &str); 4] = [
+        ("as a list", "bullets"),
+        ("as bullets", "bullets"),
+        ("on one line", "one line"),
+        ("as one line", "one line"),
+    ];
+    TABLE
+        .iter()
+        .map(|(say, action)| CommandRule {
+            say: say.to_string(),
+            action: action.to_string(),
+        })
+        .collect()
+}
+
 /// What happens to the clipboard after a transcript is pasted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -164,6 +274,21 @@ pub struct Config {
     pub punctuation_commands: bool,
     /// Whole-utterance commands: "scratch that", "quit hippo".
     pub commands: bool,
+    /// Words removed when cleanup is on.
+    #[serde(default = "default_fillers")]
+    pub fillers: Vec<String>,
+    /// Spoken punctuation, used when `punctuation_commands` is on.
+    #[serde(default = "default_punctuation")]
+    pub punctuation: Vec<SpokenRule>,
+    /// Spoken addresses, used when `formatting` is on.
+    #[serde(default = "default_formatting")]
+    pub formatting_rules: Vec<SpokenRule>,
+    /// Whole-utterance instructions, used when `commands` is on.
+    #[serde(default = "default_commands")]
+    pub command_rules: Vec<CommandRule>,
+    /// Trailing instructions that reshape the text, used when `commands` is on.
+    #[serde(default = "default_shapes")]
+    pub shape_rules: Vec<CommandRule>,
     /// Phrases that expand to fixed text.
     pub snippets: Vec<Snippet>,
     /// Whole-word substitutions, applied last.
@@ -191,6 +316,11 @@ impl Default for Config {
             history_days: 30,
             cleanup: true,
             formatting: true,
+            fillers: default_fillers(),
+            punctuation: default_punctuation(),
+            formatting_rules: default_formatting(),
+            command_rules: default_commands(),
+            shape_rules: default_shapes(),
             punctuation_commands: false,
             commands: true,
             snippets: Vec::new(),

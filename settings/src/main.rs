@@ -80,9 +80,27 @@ fn run() -> iced::Result {
         .run_with(Settings::boot)
 }
 
+/// Which rule table a message is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuleList {
+    Fillers,
+    Punctuation,
+    Formatting,
+    Commands,
+    Shapes,
+}
+
+/// Which of a rule's two fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuleField {
+    Say,
+    Becomes,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pane {
-    Settings,
+    Dictation,
+    Text,
     History,
 }
 
@@ -90,7 +108,9 @@ impl Pane {
     /// The name the request file and the handshake carry.
     fn arg(self) -> &'static str {
         match self {
-            Pane::Settings => "settings",
+            // "settings" is the name the tray has always used for the default tab.
+            Pane::Dictation => "settings",
+            Pane::Text => "text",
             Pane::History => "history",
         }
     }
@@ -118,6 +138,9 @@ enum Message {
     Clipboard(Clipboard),
     Preview(String),
     HistoryFilter(String),
+    RuleEdit(RuleList, usize, RuleField, String),
+    AddRule(RuleList),
+    RemoveRule(RuleList, usize),
     SnippetTrigger(usize, String),
     SnippetText(usize, String),
     AddSnippet,
@@ -298,6 +321,11 @@ impl Settings {
             Message::Clipboard(kind) => self.config.clipboard = kind,
             Message::Preview(text) => self.preview = text,
             Message::HistoryFilter(text) => self.history_filter = text,
+            Message::RuleEdit(list, index, field, value) => {
+                self.edit_rule(list, index, field, value)
+            }
+            Message::AddRule(list) => self.add_rule(list),
+            Message::RemoveRule(list, index) => self.remove_rule(list, index),
             Message::SnippetTrigger(index, trigger) => {
                 if let Some(snippet) = self.config.snippets.get_mut(index) {
                     snippet.trigger = trigger;
@@ -366,6 +394,119 @@ impl Settings {
         Task::none()
     }
 
+    /// Edit one field of one rule. Every table is the config's own vector, so an
+    /// edit here is an edit to what the daemon will read on the next save.
+    fn edit_rule(&mut self, list: RuleList, index: usize, field: RuleField, value: String) {
+        // The field is single-line, so `\n` is how a line break is written down.
+        let value = parse_rule(&value);
+        match list {
+            RuleList::Fillers => {
+                if let Some(filler) = self.config.fillers.get_mut(index) {
+                    *filler = value;
+                }
+            }
+            RuleList::Punctuation => {
+                if let Some(rule) = self.config.punctuation.get_mut(index) {
+                    match field {
+                        RuleField::Say => rule.say = value,
+                        RuleField::Becomes => rule.becomes = value,
+                    }
+                }
+            }
+            RuleList::Formatting => {
+                if let Some(rule) = self.config.formatting_rules.get_mut(index) {
+                    match field {
+                        RuleField::Say => rule.say = value,
+                        RuleField::Becomes => rule.becomes = value,
+                    }
+                }
+            }
+            RuleList::Commands => {
+                if let Some(rule) = self.config.command_rules.get_mut(index) {
+                    match field {
+                        RuleField::Say => rule.say = value,
+                        RuleField::Becomes => rule.action = value,
+                    }
+                }
+            }
+            RuleList::Shapes => {
+                if let Some(rule) = self.config.shape_rules.get_mut(index) {
+                    match field {
+                        RuleField::Say => rule.say = value,
+                        RuleField::Becomes => rule.action = value,
+                    }
+                }
+            }
+        }
+    }
+
+    fn add_rule(&mut self, list: RuleList) {
+        match list {
+            RuleList::Fillers => self.config.fillers.push(String::new()),
+            RuleList::Punctuation => {
+                self.config
+                    .punctuation
+                    .push(hippo_dictate::config::SpokenRule {
+                        say: String::new(),
+                        becomes: String::new(),
+                    })
+            }
+            RuleList::Formatting => {
+                self.config
+                    .formatting_rules
+                    .push(hippo_dictate::config::SpokenRule {
+                        say: String::new(),
+                        becomes: String::new(),
+                    })
+            }
+            RuleList::Commands => {
+                self.config
+                    .command_rules
+                    .push(hippo_dictate::config::CommandRule {
+                        say: String::new(),
+                        action: "discard".to_string(),
+                    })
+            }
+            RuleList::Shapes => self
+                .config
+                .shape_rules
+                .push(hippo_dictate::config::CommandRule {
+                    say: String::new(),
+                    action: "bullets".to_string(),
+                }),
+        }
+    }
+
+    fn remove_rule(&mut self, list: RuleList, index: usize) {
+        let vec_len = match list {
+            RuleList::Fillers => self.config.fillers.len(),
+            RuleList::Punctuation => self.config.punctuation.len(),
+            RuleList::Formatting => self.config.formatting_rules.len(),
+            RuleList::Commands => self.config.command_rules.len(),
+            RuleList::Shapes => self.config.shape_rules.len(),
+        };
+        if index >= vec_len {
+            return;
+        }
+        match list {
+            RuleList::Fillers => {
+                self.config.fillers.remove(index);
+            }
+            RuleList::Punctuation => {
+                self.config.punctuation.remove(index);
+            }
+            RuleList::Formatting => {
+                self.config.formatting_rules.remove(index);
+            }
+            RuleList::Commands => {
+                self.config.command_rules.remove(index);
+            }
+            RuleList::Shapes => {
+                self.config.shape_rules.remove(index);
+            }
+        }
+    }
+
     fn save(&mut self) {
         if let Some(error) = &self.hotkey_error {
             self.error = Some(format!("Hotkey: {error}"));
@@ -422,13 +563,15 @@ impl Settings {
         .align_y(iced::Alignment::Center);
 
         let tabs = row![
-            tab("Settings", Pane::Settings, self.pane, scheme),
+            tab("Dictation", Pane::Dictation, self.pane, scheme),
+            tab("Text", Pane::Text, self.pane, scheme),
             tab("History", Pane::History, self.pane, scheme),
         ]
         .spacing(tokens::SPACE_2XS);
 
         let body = match self.pane {
-            Pane::Settings => self.settings_pane(scheme),
+            Pane::Dictation => self.settings_pane(scheme),
+            Pane::Text => self.text_pane(scheme),
             Pane::History => self.history_pane(scheme),
         };
 
@@ -468,55 +611,6 @@ impl Settings {
     }
 
     fn settings_pane(&self, scheme: Scheme) -> Element<'_, Message> {
-        let preview = match rules::apply(&self.preview, &self.config) {
-            rules::Outcome::Text(text) => text,
-            rules::Outcome::Command(command) => format!("command: {}", command.arg()),
-        };
-        let preview = if self.preview.trim().is_empty() {
-            "Type a phrase to see what the rules do.".to_string()
-        } else {
-            format!("Result: {preview}")
-        };
-        let mut snippets = column![].spacing(tokens::SPACE_2XS).width(Length::Fill);
-        for (index, snippet) in self.config.snippets.iter().enumerate() {
-            snippets = snippets.push(
-                row![
-                    text_input("trigger", snippet.trigger.as_str())
-                        .on_input(move |text| Message::SnippetTrigger(index, text))
-                        .style(pill_input)
-                        .width(Length::FillPortion(2)),
-                    text_input("becomes this", snippet.text.as_str())
-                        .on_input(move |text| Message::SnippetText(index, text))
-                        .style(pill_input)
-                        .width(Length::FillPortion(3)),
-                    button(text("\u{2715}").size(tokens::TEXT_SM))
-                        .on_press(Message::RemoveSnippet(index))
-                        .style(segment_button(scheme, false, false, false)),
-                ]
-                .spacing(tokens::SPACE_SM)
-                .align_y(iced::Alignment::Center),
-            );
-        }
-        let mut replacements = column![].spacing(tokens::SPACE_2XS).width(Length::Fill);
-        for (index, rule) in self.config.replacements.iter().enumerate() {
-            replacements = replacements.push(
-                row![
-                    text_input("heard", rule.from.as_str())
-                        .on_input(move |text| Message::ReplacementFrom(index, text))
-                        .style(pill_input)
-                        .width(Length::FillPortion(2)),
-                    text_input("written", rule.to.as_str())
-                        .on_input(move |text| Message::ReplacementTo(index, text))
-                        .style(pill_input)
-                        .width(Length::FillPortion(3)),
-                    button(text("\u{2715}").size(tokens::TEXT_SM))
-                        .on_press(Message::RemoveReplacement(index))
-                        .style(segment_button(scheme, false, false, false)),
-                ]
-                .spacing(tokens::SPACE_SM)
-                .align_y(iced::Alignment::Center),
-            );
-        }
         let device_value = self
             .config
             .device
@@ -554,77 +648,6 @@ impl Settings {
                 Message::ToggleTrailing,
                 scheme,
             ),
-            settings_divider(scheme),
-            section("Text", scheme),
-            switch_row(
-                "Cleanup",
-                "Strip fillers and repeated words, and tidy the spacing",
-                self.config.cleanup,
-                true,
-                Message::ToggleCleanup,
-                scheme,
-            ),
-            switch_row(
-                "Formatting",
-                "Turn \"at sign\" and \"dot com\" into an address",
-                self.config.formatting,
-                true,
-                Message::ToggleFormatting,
-                scheme,
-            ),
-            switch_row(
-                "Spoken punctuation",
-                "Treat \"comma\" and \"new paragraph\" as punctuation. Never an Enter key",
-                self.config.punctuation_commands,
-                true,
-                Message::TogglePunctuation,
-                scheme,
-            ),
-            switch_row(
-                "Voice commands",
-                "\"scratch that\" discards, \"quit hippo\" stops, \"as a list\" makes bullets",
-                self.config.commands,
-                true,
-                Message::ToggleCommands,
-                scheme,
-            ),
-            settings_row(
-                "Clipboard after",
-                pick_list(
-                    Clipboard::ALL.as_slice(),
-                    Some(self.config.clipboard),
-                    Message::Clipboard,
-                )
-                .style(pill_pick(scheme)),
-                scheme,
-            ),
-            settings_row(
-                "Try a phrase",
-                text_input("type a phrase", self.preview.as_str())
-                    .on_input(Message::Preview)
-                    .style(pill_input)
-                    .width(Length::Fill),
-                scheme,
-            ),
-            text(preview).size(tokens::TEXT_XS).color(scheme.muted),
-            settings_divider(scheme),
-            section("Snippets", scheme),
-            text("Say the trigger as the whole utterance and the text replaces it.")
-                .size(tokens::TEXT_XS)
-                .color(scheme.muted),
-            snippets,
-            button(text("Add snippet").size(tokens::TEXT_SM))
-                .on_press(Message::AddSnippet)
-                .style(segment_button(scheme, false, false, false)),
-            settings_divider(scheme),
-            section("Replacements", scheme),
-            text("Whole words, case-insensitive, applied after everything else.")
-                .size(tokens::TEXT_XS)
-                .color(scheme.muted),
-            replacements,
-            button(text("Add replacement").size(tokens::TEXT_SM))
-                .on_press(Message::AddReplacement)
-                .style(segment_button(scheme, false, false, false)),
             settings_divider(scheme),
             section("Activation", scheme),
             settings_row(
@@ -752,6 +775,207 @@ impl Settings {
         body.into()
     }
 
+    /// Everything between the decoder and the clipboard: the switches, a live
+    /// preview, and every rule table the switches act on.
+    fn text_pane(&self, scheme: Scheme) -> Element<'_, Message> {
+        let preview = match rules::apply(&self.preview, &self.config) {
+            rules::Outcome::Text(text) => text,
+            rules::Outcome::Command(command) => format!("command: {}", command.arg()),
+        };
+        let preview = if self.preview.trim().is_empty() {
+            "Type a phrase to see what the rules do.".to_string()
+        } else {
+            format!("Result: {preview}")
+        };
+
+        let fillers: Vec<(String, String)> = self
+            .config
+            .fillers
+            .iter()
+            .map(|filler| (filler.clone(), String::new()))
+            .collect();
+        let punctuation: Vec<(String, String)> = self
+            .config
+            .punctuation
+            .iter()
+            .map(|rule| (rule.say.clone(), rule.becomes.clone()))
+            .collect();
+        let formatting: Vec<(String, String)> = self
+            .config
+            .formatting_rules
+            .iter()
+            .map(|rule| (rule.say.clone(), rule.becomes.clone()))
+            .collect();
+        let commands: Vec<(String, String)> = self
+            .config
+            .command_rules
+            .iter()
+            .map(|rule| (rule.say.clone(), rule.action.clone()))
+            .collect();
+        let shapes: Vec<(String, String)> = self
+            .config
+            .shape_rules
+            .iter()
+            .map(|rule| (rule.say.clone(), rule.action.clone()))
+            .collect();
+
+        let mut snippets: iced::widget::Column<'_, Message> =
+            column![].spacing(tokens::SPACE_2XS).width(Length::Fill);
+        for (index, snippet) in self.config.snippets.iter().enumerate() {
+            snippets = snippets.push(
+                row![
+                    text_input("trigger", snippet.trigger.as_str())
+                        .on_input(move |text| Message::SnippetTrigger(index, text))
+                        .style(pill_input)
+                        .width(Length::FillPortion(2)),
+                    text_input("becomes this", snippet.text.as_str())
+                        .on_input(move |text| Message::SnippetText(index, text))
+                        .style(pill_input)
+                        .width(Length::FillPortion(3)),
+                    button(text("\u{2715}").size(tokens::TEXT_SM))
+                        .on_press(Message::RemoveSnippet(index))
+                        .style(segment_button(scheme, false, false, false)),
+                ]
+                .spacing(tokens::SPACE_SM)
+                .align_y(iced::Alignment::Center),
+            );
+        }
+        let mut replacements: iced::widget::Column<'_, Message> =
+            column![].spacing(tokens::SPACE_2XS).width(Length::Fill);
+        for (index, rule) in self.config.replacements.iter().enumerate() {
+            replacements = replacements.push(
+                row![
+                    text_input("heard", rule.from.as_str())
+                        .on_input(move |text| Message::ReplacementFrom(index, text))
+                        .style(pill_input)
+                        .width(Length::FillPortion(2)),
+                    text_input("written", rule.to.as_str())
+                        .on_input(move |text| Message::ReplacementTo(index, text))
+                        .style(pill_input)
+                        .width(Length::FillPortion(3)),
+                    button(text("\u{2715}").size(tokens::TEXT_SM))
+                        .on_press(Message::RemoveReplacement(index))
+                        .style(segment_button(scheme, false, false, false)),
+                ]
+                .spacing(tokens::SPACE_SM)
+                .align_y(iced::Alignment::Center),
+            );
+        }
+
+        column![
+            text("What happens to a transcript between the decoder and the clipboard. Every rule below is a row you can edit.")
+                .size(tokens::TEXT_SM)
+                .color(scheme.muted),
+            switch_row(
+                "Cleanup",
+                "Strip fillers and repeated words, and tidy the spacing",
+                self.config.cleanup,
+                true,
+                Message::ToggleCleanup,
+                scheme,
+            ),
+            switch_row(
+                "Formatting",
+                "Turn a spoken address into a real one: \"at sign\", \"dot com\"",
+                self.config.formatting,
+                true,
+                Message::ToggleFormatting,
+                scheme,
+            ),
+            switch_row(
+                "Spoken punctuation",
+                "Treat a spoken name as the punctuation mark it names",
+                self.config.punctuation_commands,
+                true,
+                Message::TogglePunctuation,
+                scheme,
+            ),
+            switch_row(
+                "Voice commands",
+                "A whole utterance, or a trailing phrase, that is an instruction",
+                self.config.commands,
+                true,
+                Message::ToggleCommands,
+                scheme,
+            ),
+            settings_row(
+                "Clipboard after",
+                pick_list(
+                    Clipboard::ALL.as_slice(),
+                    Some(self.config.clipboard),
+                    Message::Clipboard,
+                )
+                .style(pill_pick(scheme)),
+                scheme,
+            ),
+            settings_row(
+                "Try a phrase",
+                text_input("type a phrase", self.preview.as_str())
+                    .on_input(Message::Preview)
+                    .style(pill_input)
+                    .width(Length::Fill),
+                scheme,
+            ),
+            text(preview).size(tokens::TEXT_XS).color(scheme.muted),
+            settings_divider(scheme),
+            section("Fillers", scheme),
+            text("Removed as whole words while cleanup is on.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
+            rule_rows(RuleList::Fillers, &fillers, "um", "", false, scheme),
+            add_button("Add filler", RuleList::Fillers, scheme),
+            settings_divider(scheme),
+            section("Spoken punctuation", scheme),
+            text("What to say, and the characters it becomes. A trailing space is part of the replacement, and \\n is a line break.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
+            rule_rows(RuleList::Punctuation, &punctuation, "comma", ", ", true, scheme),
+            add_button("Add punctuation", RuleList::Punctuation, scheme),
+            settings_divider(scheme),
+            section("Spoken formatting", scheme),
+            text("Addresses: what to say, and what it becomes.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
+            rule_rows(RuleList::Formatting, &formatting, "at sign", "@", true, scheme),
+            add_button("Add formatting", RuleList::Formatting, scheme),
+            settings_divider(scheme),
+            section("Voice commands", scheme),
+            text("Said as the whole utterance. Action is discard or quit.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
+            rule_rows(RuleList::Commands, &commands, "scratch that", "discard", true, scheme),
+            add_button("Add command", RuleList::Commands, scheme),
+            settings_divider(scheme),
+            section("Trailing shapes", scheme),
+            text("Said at the end of an utterance. Action is bullets or one line.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
+            rule_rows(RuleList::Shapes, &shapes, "as a list", "bullets", true, scheme),
+            add_button("Add shape", RuleList::Shapes, scheme),
+            settings_divider(scheme),
+            section("Snippets", scheme),
+            text("Say the trigger as the whole utterance and the text replaces it.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
+            snippets,
+            button(text("Add snippet").size(tokens::TEXT_SM))
+                .on_press(Message::AddSnippet)
+                .style(segment_button(scheme, false, false, false)),
+            settings_divider(scheme),
+            section("Replacements", scheme),
+            text("Whole words, case-insensitive, applied after everything else.")
+                .size(tokens::TEXT_XS)
+                .color(scheme.muted),
+            replacements,
+            button(text("Add replacement").size(tokens::TEXT_SM))
+                .on_press(Message::AddReplacement)
+                .style(segment_button(scheme, false, false, false)),
+        ]
+        .spacing(tokens::SPACE_MD)
+        .width(Length::Fill)
+        .into()
+    }
+
     fn history_pane(&self, scheme: Scheme) -> Element<'_, Message> {
         if !self.config.history {
             return column![
@@ -766,7 +990,7 @@ impl Settings {
                 .size(tokens::TEXT_SM)
                 .color(scheme.muted),
                 button(text("Open settings").size(16.0))
-                    .on_press(Message::Pane(Pane::Settings))
+                    .on_press(Message::Pane(Pane::Dictation))
                     .style(pill_button_secondary)
                     .height(Length::Fixed(tokens::CONTROL_HEIGHT))
                     .padding([0, 14]),
@@ -871,7 +1095,8 @@ impl Settings {
 fn requested_pane() -> Pane {
     match std::env::var("HIPPO_DICTATE_START_PANE").as_deref() {
         Ok("history") => Pane::History,
-        _ => Pane::Settings,
+        Ok("text") => Pane::Text,
+        _ => Pane::Dictation,
     }
 }
 
@@ -881,7 +1106,8 @@ fn take_requested_pane() -> Option<Pane> {
     let _ = std::fs::remove_file(&path);
     match text.trim() {
         "history" => Some(Pane::History),
-        "settings" => Some(Pane::Settings),
+        "text" => Some(Pane::Text),
+        "settings" => Some(Pane::Dictation),
         _ => None,
     }
 }
@@ -968,6 +1194,68 @@ fn load_entries(config: &Config) -> Vec<history::Entry> {
 ///
 /// `device` is the one field whose "unset" state has to be written as an absence:
 /// `None` means the host default, so the key is removed rather than left behind.
+/// A rule's value as it can be typed: a newline is shown as `\n`, because a
+/// single-line input cannot display one and an empty box would read as a rule
+/// that does nothing.
+fn show_rule(value: &str) -> String {
+    value.replace('\n', "\\n")
+}
+
+/// The inverse: what the user typed, with `\n` turned back into a newline.
+fn parse_rule(value: &str) -> String {
+    value.replace("\\n", "\n")
+}
+
+/// One rule table: a text input per field, and a remove button per row.
+fn rule_rows<'a>(
+    list: RuleList,
+    rows: &[(String, String)],
+    say_hint: &'a str,
+    becomes_hint: &'a str,
+    two_fields: bool,
+    scheme: Scheme,
+) -> Element<'a, Message> {
+    let mut table: iced::widget::Column<'_, Message> = iced::widget::column![]
+        .spacing(tokens::SPACE_2XS)
+        .width(Length::Fill);
+    for (index, (say, becomes)) in rows.iter().enumerate() {
+        let mut entry = row![text_input(say_hint, say.as_str())
+            .on_input(move |text| Message::RuleEdit(list, index, RuleField::Say, text))
+            .style(pill_input)
+            .width(if two_fields {
+                Length::FillPortion(2)
+            } else {
+                Length::Fill
+            }),];
+        if two_fields {
+            entry = entry.push(
+                text_input(becomes_hint, show_rule(becomes).as_str())
+                    .on_input(move |text| Message::RuleEdit(list, index, RuleField::Becomes, text))
+                    .style(pill_input)
+                    .width(Length::FillPortion(3)),
+            );
+        }
+        entry = entry.push(
+            button(text("\u{2715}").size(tokens::TEXT_SM))
+                .on_press(Message::RemoveRule(list, index))
+                .style(segment_button(scheme, false, false, false)),
+        );
+        table = table.push(
+            entry
+                .spacing(tokens::SPACE_SM)
+                .align_y(iced::Alignment::Center),
+        );
+    }
+    table.into()
+}
+
+fn add_button<'a>(label: &'a str, list: RuleList, scheme: Scheme) -> Element<'a, Message> {
+    button(text(label).size(tokens::TEXT_SM))
+        .on_press(Message::AddRule(list))
+        .style(segment_button(scheme, false, false, false))
+        .into()
+}
+
 /// A row the user opened and left blank is not a rule: writing it out would leave
 /// dead entries in the file for every abandoned "Add".
 fn pruned(config: &Config) -> Config {
@@ -978,6 +1266,19 @@ fn pruned(config: &Config) -> Config {
     config
         .replacements
         .retain(|rule| !rule.from.trim().is_empty());
+    config.fillers.retain(|filler| !filler.trim().is_empty());
+    config
+        .punctuation
+        .retain(|rule| !rule.say.trim().is_empty());
+    config
+        .formatting_rules
+        .retain(|rule| !rule.say.trim().is_empty());
+    config
+        .command_rules
+        .retain(|rule| !rule.say.trim().is_empty());
+    config
+        .shape_rules
+        .retain(|rule| !rule.say.trim().is_empty());
     config
 }
 

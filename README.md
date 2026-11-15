@@ -193,26 +193,50 @@ A transcript goes through a rules pass between the decoder and the clipboard. No
 model, no network: a rule either fires or it does not, which is why these are
 testable and why they cannot invent a word you did not say.
 
-- `cleanup = true` — remove "um", "uh" and friends, collapse an immediately
+Every rule is a row in the config file — you can read the whole table and change
+any of it — and the window's **Text** tab edits the same rows.
+
+- `cleanup = true` — remove the words in `fillers`, collapse an immediately
   repeated run ("the the"), tidy spacing and stray punctuation.
-- `formatting = true` — spoken addresses: "sean at sign example dot com" becomes
-  `sean@example.com`, "example dot dev" becomes `example.dev`.
-- `punctuation_commands = false` — spoken punctuation. Off by default, because
-  people say "comma" and "period" in prose; on, "hello comma world" becomes
-  "hello, world", and "new paragraph" becomes a blank line. It is text, never an
-  injected Enter.
-- `commands = true` — a whole utterance can be an instruction: "scratch that"
-  discards it, "quit hippo" stops the daemon. It only matches the whole
-  utterance, so a sentence that contains the words is still a sentence. A
-  trailing instruction shapes the text instead: "… as a list" makes one bullet per
-  sentence, "… on one line" joins it up. A terminal still gets one line, because a
-  newline pasted into a shell runs the next word as a command.
+- `[[fillers]]` — the words cleanup removes. Shipped: um, uh, uhm, erm, hmm, mhm.
+- `formatting = true` — spoken addresses, from `[[formatting_rules]]`: "at sign"
+  becomes `@`, "dot com" becomes `.com`, and so on for ten common domains.
+- `punctuation_commands = false` — off by default, because people say "comma" and
+  "period" in prose. On, each row of `[[punctuation]]` turns a spoken name into
+  characters: `comma` → `, `, `question mark` → `? `, `new paragraph` → a blank
+  line. A trailing space is part of the replacement, and `\n` in the window's
+  field is a line break.
+- `commands = true` — a whole utterance from `[[command_rules]]` is an
+  instruction: action `discard` ("scratch that") or `quit` ("quit hippo"). A
+  trailing phrase from `[[shape_rules]]` reshapes instead: action `bullets` ("as a
+  list", one bullet per sentence) or `one line` ("on one line"). Both only match
+  the whole utterance, or a suffix of it, so a sentence that contains the words is
+  still a sentence.
 - `[[snippets]]` — a trigger phrase that expands to fixed text, on an exact
   whole-utterance match.
 - `[[replacements]]` — whole-word, case-insensitive substitutions, applied last.
 
+The punctuation characters are **pasted, not typed**: a newline inside a
+transcript is a newline inside the clipboard payload, and for a terminal the
+payload is flattened to one line, so a paragraph break can never execute the
+next word there.
+
 ```toml
 punctuation_commands = true
+
+# The shipped table is long; a config only needs the rows it changes when it
+# replaces the whole table, so copy the defaults before editing them.
+[[punctuation]]
+say = "semi"
+becomes = "; "
+
+[[command_rules]]
+say = "belay that"
+action = "discard"
+
+[[shape_rules]]
+say = "as points"
+action = "bullets"
 
 [[snippets]]
 trigger = "my calendar link"
@@ -230,10 +254,10 @@ already sentence-cases its output, and a rule that re-cases would only be able t
 make it worse.
 
 `hippo-dictate text "um, mail sean at sign example dot com"` runs the pass on a
-string and prints what would be pasted, which is the fastest way to check a
-dictionary rule. The settings window has the same thing live: five switches for
-the rules and the clipboard, a phrase box that shows the result as you type, and
-row editors for snippets and replacements.
+string and prints what would be pasted, which is the fastest way to check a rule.
+The settings window's **Text** tab has the same thing live: the switches, a phrase
+box that shows the result as you type, and a row editor for every table above —
+fillers, punctuation, formatting, commands, shapes, snippets and replacements.
 
 Hotkeys are the exception: the Windows daemon registers its chords at startup, so
 a new chord needs a restart. Nothing else does.
@@ -453,9 +477,10 @@ bar. `scripts/make-app-icons.py` derives every shipped size from
 `icons/microphone-icon-1024.png`: the `.ico` frames, the taskbar bitmap and the
 Linux hicolor tree under `packaging/`.
 
-Two panes: settings, and the transcripts kept when "Keep history" is on. It reads
-`config.toml` and `history.tsv` and writes only the former, editing the document
-in place so a key it does not recognise and the comments around it survive a save.
+Three tabs: **Dictation** (input, delivery, activation), **Text** (every rule table
+and the live preview), and **History**. It reads `config.toml` and `history.tsv`
+and writes only the former, editing the document in place so a key it does not
+recognise and the comments around it survive a save.
 The Windows hotkey is editable there; a chord it cannot parse is reported instead
 of saved. Everything except the hotkeys takes effect without a restart — see
 "Configuration" above.
