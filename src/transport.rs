@@ -15,9 +15,9 @@ pub trait Stream: Read + Write + Send {}
 impl<T: Read + Write + Send> Stream for T {}
 
 /// "Nothing is listening", as distinct from "a daemon answered and the answer was
-/// wrong". `toggle` may start a daemon only in the first case: treating a live but
-/// confused daemon as absent is how you end up with two of them fighting over the
-/// endpoint.
+/// wrong". The distinction is what lets `status` and `quit` say "not running"
+/// instead of surfacing a connection error, without any command mistaking a live
+/// but confused daemon for an absent one.
 #[derive(Debug)]
 pub struct Unreachable;
 
@@ -33,7 +33,8 @@ fn unreachable(context: String) -> anyhow::Error {
     anyhow::Error::new(Unreachable).context(context)
 }
 
-/// Whether this error means "try starting one".
+/// Whether this error means "nothing is listening" rather than "the daemon
+/// answered and the answer was wrong".
 pub fn is_unreachable(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| cause.is::<Unreachable>())
 }
@@ -247,8 +248,8 @@ mod tests {
         let missing = unreachable("connect /nope".to_string());
         assert!(is_unreachable(&missing));
 
-        // A daemon that answered with nonsense must not be treated as absent,
-        // or `toggle` would start a second one on top of it.
+        // A daemon that answered with nonsense must not be reported as "not
+        // running".
         let confused = anyhow::anyhow!("parse reply: expected value");
         assert!(!is_unreachable(&confused));
     }

@@ -51,9 +51,10 @@ cargo build --workspace
 hippo-dictate quit             # replace the daemon that is still running
 ```
 
-`toggle` spawns a daemon when none is listening, so the next press starts the new
-build — `quit` is the entire restart, and there is no daemon to start by hand.
-`scripts/install.sh` points the same symlinks back at a release install.
+`toggle` only talks to a daemon that is already running; it does not start one, so
+after `quit` there is no daemon until the session starts it again (`hippo-dictate
+daemon`, or the login entry). `scripts/install.sh` points the same symlinks back at
+a release install.
 
 Two consequences worth knowing: a rebuild on Linux can replace the binary while
 the old daemon keeps running, so `quit` is what makes the new code take effect

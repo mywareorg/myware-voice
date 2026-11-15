@@ -8,10 +8,9 @@
 # The daemon holds its binary in memory, so a rebuild changes nothing until it is
 # replaced:
 #
-#   cargo build && hippo-dictate quit
+#   cargo build && hippo-dictate quit && hippo-dictate daemon &
 #
-# and the next key press starts the new one. `toggle` spawns a daemon when none is
-# listening, so there is no daemon to start by hand and nothing to keep running.
+# `toggle` never starts a daemon itself, so the restart has to name one.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -42,7 +41,6 @@ fi
 echo "PATH now runs $debug"
 echo
 echo "after a rebuild, replace the running daemon:"
-echo "  cargo build && hippo-dictate quit"
-echo "then press the key: the first toggle starts the new build."
+echo "  cargo build && hippo-dictate quit && hippo-dictate daemon &"
 echo
 echo "'scripts/install.sh' points these back at a release install."

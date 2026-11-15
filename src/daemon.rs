@@ -301,98 +301,17 @@ pub fn request(command: &str) -> Result<Reply> {
     Ok(reply)
 }
 
-/// Send `toggle`, starting the daemon first if it is not running.
-pub fn toggle() -> Result<Reply> {
-    deliver_command("toggle")
-}
-
-/// Send `toggle-stream`, with the same "start it if it is not there" behaviour.
+/// Send `toggle` to the daemon.
 ///
-/// Without this the streaming keybind would be the only one that does nothing on
-/// a cold login, and the difference between the two chords would look arbitrary.
+/// Starting the daemon is not this command's job: a press with nothing listening
+/// reports that instead of racing the login session to launch a second daemon.
+pub fn toggle() -> Result<Reply> {
+    request("toggle")
+}
+
+/// Send `toggle-stream` to the daemon, on the same terms.
 pub fn toggle_stream() -> Result<Reply> {
-    deliver_command("toggle-stream")
-}
-
-/// Send one command to the daemon, starting it first when nothing is listening.
-fn deliver_command(command: &str) -> Result<Reply> {
-    match request(command) {
-        Ok(reply) => Ok(reply),
-        // Only "nothing is listening" starts a daemon. A live daemon that
-        // answered badly must not get a competitor.
-        Err(error) if !transport::is_unreachable(&error) => Err(error),
-        Err(_) => {
-            spawn_daemon()?;
-            let deadline = Instant::now() + Duration::from_secs(2);
-            loop {
-                match request(command) {
-                    Ok(reply) => return Ok(reply),
-                    Err(error) if Instant::now() < deadline => {
-                        let _ = error;
-                        thread::sleep(Duration::from_millis(50));
-                    }
-                    Err(error) => return Err(error).context("daemon did not come up"),
-                }
-            }
-        }
-    }
-}
-
-fn spawn_daemon() -> Result<()> {
-    let exe = std::env::current_exe().context("current executable")?;
-    // Prefer the GUI-subsystem daemon binary when it is installed beside us: it
-    // opens no console window, which matters at login. Fall back to this
-    // executable's `daemon` subcommand for a development build.
-    let sibling = exe.parent().map(|dir| {
-        dir.join(if cfg!(windows) {
-            "hippo-dictate-daemon.exe"
-        } else {
-            "hippo-dictate-daemon"
-        })
-    });
-    let log = log::path()?;
-    if let Some(dir) = log.parent() {
-        std::fs::create_dir_all(dir).ok();
-    }
-    let out = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log)
-        .ok();
-    let mut command = match sibling.filter(|path| path.is_file()) {
-        Some(path) => std::process::Command::new(path),
-        None => {
-            let mut command = std::process::Command::new(exe);
-            command.arg("daemon");
-            command
-        }
-    };
-    command.stdin(std::process::Stdio::null());
-    match out {
-        Some(file) => {
-            let err = file.try_clone()?;
-            command.stdout(file).stderr(err);
-        }
-        None => {
-            command.stdout(std::process::Stdio::null());
-            command.stderr(std::process::Stdio::null());
-        }
-    }
-    // Detach from the launcher so the process that started the daemon cannot
-    // take it down: its own process group on Unix, no console on Windows.
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    command.spawn().context("spawn daemon")?;
-    Ok(())
+    request("toggle-stream")
 }
 
 /// What the decoder thread is asked to do.

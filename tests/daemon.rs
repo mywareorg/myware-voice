@@ -3,7 +3,7 @@
 //!
 //! No model, no device and no display server, so this runs on any Linux CI box.
 //! The daemon is a separate process because that is the only way to exercise the
-//! socket, the detached spawn path and the process lifecycle together.
+//! socket and the process lifecycle together.
 #![cfg(unix)]
 
 use std::io::{BufRead, BufReader, Write};

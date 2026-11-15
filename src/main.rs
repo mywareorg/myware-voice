@@ -249,22 +249,34 @@ fn main() -> Result<()> {
             }
             Err(error) => Err(error),
         },
-        Command::Toggle => {
-            let reply = daemon::toggle()?;
-            match reply.phase {
-                Some(phase) => println!("{phase}"),
-                None => println!("ok"),
+        Command::Toggle => match daemon::toggle() {
+            Ok(reply) => {
+                match reply.phase {
+                    Some(phase) => println!("{phase}"),
+                    None => println!("ok"),
+                }
+                Ok(())
             }
-            Ok(())
-        }
-        Command::Stream => {
-            let reply = daemon::toggle_stream()?;
-            if !reply.ok {
-                anyhow::bail!(reply.error.unwrap_or_else(|| "daemon error".into()));
+            Err(error) if hippo_dictate::transport::is_unreachable(&error) => {
+                println!("not running");
+                Ok(())
             }
-            println!("ok");
-            Ok(())
-        }
+            Err(error) => Err(error),
+        },
+        Command::Stream => match daemon::toggle_stream() {
+            Ok(reply) => {
+                if !reply.ok {
+                    anyhow::bail!(reply.error.unwrap_or_else(|| "daemon error".into()));
+                }
+                println!("ok");
+                Ok(())
+            }
+            Err(error) if hippo_dictate::transport::is_unreachable(&error) => {
+                println!("not running");
+                Ok(())
+            }
+            Err(error) => Err(error),
+        },
         Command::Status => {
             let reply = match daemon::request("status") {
                 Ok(reply) => reply,
