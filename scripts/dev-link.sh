@@ -30,6 +30,15 @@ for name in hippo-dictate hippo-dictate-daemon hippo-dictate-settings hippo-dict
     ln -sfn "$debug/$name" "$prefix/bin/$name"
 done
 
+# The launcher has an absolute Exec= written by install.sh, so it would keep
+# running the installed release while the keybind runs the checkout — the exact
+# confusion this script exists to avoid.
+entry="$prefix/share/applications/hippo-dictate.desktop"
+if [ -f "$entry" ]; then
+    sed -i "s|^Exec=.*|Exec=$debug/hippo-dictate-settings|" "$entry"
+    echo "launcher now runs $debug/hippo-dictate-settings"
+fi
+
 echo "PATH now runs $debug"
 echo
 echo "after a rebuild, replace the running daemon:"

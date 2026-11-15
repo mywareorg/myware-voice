@@ -131,10 +131,11 @@ pub fn spawn(events: Sender<Event>) -> Result<()> {
     std::thread::Builder::new()
         .name("tray".into())
         .spawn(move || {
-            // The watcher belongs to the bar, which may start after us at login;
-            // five seconds of patience covers the usual ordering and costs
-            // nothing when the tray appears first.
-            for attempt in 1..=5 {
+            // The watcher belongs to the bar, which may start long after us —
+            // waybar relaunching after a crash, or a slow session — so the window
+            // is half a minute. One cheap D-Bus attempt a second, and nothing at
+            // all once it succeeds.
+            for attempt in 1..=30 {
                 match (Hippo {
                     events: events.clone(),
                 })
@@ -148,9 +149,9 @@ pub fn spawn(events: Sender<Event>) -> Result<()> {
                         crate::log::write("tray: registered with the StatusNotifier watcher");
                         return;
                     }
-                    Err(error) if attempt == 5 => {
+                    Err(error) if attempt == 30 => {
                         crate::log::error(&format!(
-                            "tray: no StatusNotifier host after five attempts: {error}"
+                            "tray: no StatusNotifier host after 30 attempts: {error}"
                         ));
                         return;
                     }

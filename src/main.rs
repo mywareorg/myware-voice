@@ -475,6 +475,14 @@ fn doctor() -> Result<()> {
     if let Some(note) = &entitlement.note {
         println!("  note        {note}");
     }
+    #[cfg(target_os = "linux")]
+    println!(
+        "popup         {}",
+        match inject::find("hippo-dictate-overlay") {
+            Some(path) => path.display().to_string(),
+            None => "not installed (no listening popup; a tone still plays)".to_string(),
+        }
+    );
     #[cfg(unix)]
     println!(
         "cue player    {}",

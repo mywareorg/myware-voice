@@ -14,9 +14,10 @@
 /// told which pane was asked for.
 #[cfg(target_os = "linux")]
 pub fn claim(pane: &str) -> bool {
-    use std::io::{Read, Write};
+    use std::io::{BufRead, BufReader, Write};
     use std::os::linux::net::SocketAddrExt;
     use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
+    use std::time::Duration;
 
     let Ok(address) = SocketAddr::from_abstract_name(b"hippo-dictate-settings") else {
         return true;
@@ -30,8 +31,11 @@ pub fn claim(pane: &str) -> bool {
                     for stream in listener.incoming() {
                         let Ok(mut stream) = stream else { continue };
                         let mut requested = String::new();
-                        if stream.read_to_string(&mut requested).is_err() {
-                            continue;
+                        {
+                            let mut reader = BufReader::new(&mut stream);
+                            if reader.read_line(&mut requested).is_err() {
+                                continue;
+                            }
                         }
                         let requested = requested.trim();
                         if requested.is_empty() {
@@ -43,17 +47,36 @@ pub fn claim(pane: &str) -> bool {
                             }
                             let _ = std::fs::write(&path, requested);
                         }
+                        // Answer only after the request is on disk. A window that
+                        // is alive but stopped accepts the connection and never
+                        // reads, and the caller has to be able to tell.
+                        let _ = stream.write_all(b"ok\n");
                     }
                 })
                 .ok();
             true
         }
         Err(_) => {
+            let mut handled = false;
             if let Ok(mut stream) = UnixStream::connect_addr(&address) {
                 let _ = writeln!(stream, "{pane}");
+                // Short patience on purpose: a stopped window must not make the
+                // click do nothing at all.
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(400)));
+                let mut answer = String::new();
+                let mut reader = BufReader::new(&mut stream);
+                if reader.read_line(&mut answer).is_ok() && answer.trim() == "ok" {
+                    handled = true;
+                }
             }
-            focus_existing();
-            false
+            if handled {
+                focus_existing();
+                false
+            } else {
+                // Nobody took it. Opening a second window beats a menu item that
+                // silently does nothing, even though it is the lesser evil.
+                true
+            }
         }
     }
 }

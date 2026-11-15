@@ -23,7 +23,10 @@ impl Popup {
         let mut child = Command::new(binary)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            // Inherited, not discarded: the daemon's stderr is the log file, so a
+            // compositor that cannot host a layer surface leaves its reason there
+            // instead of the popup simply never appearing.
+            .stderr(Stdio::inherit())
             .spawn()
             .map_err(|error| crate::log::error(&format!("popup: {error}")))
             .ok()?;

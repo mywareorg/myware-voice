@@ -136,7 +136,18 @@ struct Settings {
 
 impl Settings {
     fn boot() -> (Self, Task<Message>) {
-        let config = Config::load().unwrap_or_default();
+        // A file that will not parse is shown as defaults, but the reason is kept:
+        // the settings on screen are not the ones on disk, and saving would make
+        // that true.
+        let (config, config_error) = match Config::load() {
+            Ok(config) => (config, None),
+            Err(error) => (
+                Config::default(),
+                Some(format!(
+                    "config.toml does not parse, so nothing can be saved here until it does: {error}"
+                )),
+            ),
+        };
         let mut devices = vec![SYSTEM_DEFAULT.to_string()];
         devices.extend(capture::input_devices().unwrap_or_default());
 
@@ -182,7 +193,7 @@ impl Settings {
                 entries,
                 copied: None,
                 saved: false,
-                error: None,
+                error: config_error,
                 model_state,
             },
             Task::none(),
@@ -743,9 +754,18 @@ fn load_entries(config: &Config) -> Vec<history::Entry> {
 /// `None` means the host default, so the key is removed rather than left behind.
 fn write_config(path: &std::path::Path, config: &Config) -> Result<(), String> {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
-    // A file that will not parse is replaced rather than preserved: the window is
-    // showing the settings the user can keep, and the daemon falls back to the
-    // defaults for the same reason.
+    // A file that will not parse is left alone. The window is showing defaults
+    // because it could not read the real settings, so saving would replace a
+    // hand-edit with them — destroying exactly the text the daemon is refusing to
+    // use. The check is against `Config`, not the TOML grammar: `paste =
+    // "nonsense"` is valid TOML and an unreadable setting.
+    if !existing.trim().is_empty() {
+        if let Err(error) = toml::from_str::<Config>(&existing) {
+            return Err(format!(
+                "config.toml was not overwritten because it does not parse ({error}); fix it in an editor"
+            ));
+        }
+    }
     let mut document = existing
         .parse::<toml_edit::DocumentMut>()
         .unwrap_or_else(|_| toml_edit::DocumentMut::new());
@@ -848,6 +868,22 @@ mod tests {
         let back: Config = toml::from_str(&text).expect("parse the saved file");
         assert_eq!(back.paste, PasteMethod::Ydotool);
         assert_eq!(back.device, None);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_is_never_overwritten() {
+        let path =
+            std::env::temp_dir().join(format!("hippo-dictate-broken-{}.toml", std::process::id()));
+        // A typo the user can still fix by hand: saving over it would replace
+        // their file with the defaults this window fell back to.
+        std::fs::write(&path, "cleanup = true\npaste = \"nonsense\"\n").expect("write");
+
+        let error = write_config(&path, &Config::default()).expect_err("it overwrote the file");
+        assert!(error.contains("does not parse"), "{error}");
+        let text = std::fs::read_to_string(&path).expect("read back");
+        assert!(text.contains("nonsense"), "the file was rewritten: {text}");
 
         let _ = std::fs::remove_file(&path);
     }
