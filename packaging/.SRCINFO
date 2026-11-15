@@ -1,0 +1,25 @@
+pkgbase = hippo-dictate
+	pkgdesc = Push-to-talk dictation for sway/Wayland, with a local speech model
+	pkgver = 0.2.0
+	pkgrel = 1
+	url = https://gitlab.com/librewarelive/hippo-dictate
+	arch = x86_64
+	license = LGPL-2.1-only
+	makedepends = cargo
+	makedepends = rust
+	makedepends = pkgconf
+	depends = gcc-libs
+	depends = wl-clipboard
+	depends = libnotify
+	depends = hicolor-icon-theme
+	depends = alsa-lib
+	depends = libxkbcommon
+	depends = wayland
+	optdepends = wtype: paste without uinput access
+	optdepends = ydotool: paste where wtype is unavailable
+	source = hippo-dictate-0.2.0.tar.gz::https://gitlab.com/librewarelive/hippo-dictate/-/archive/v0.2.0/hippo-dictate-v0.2.0.tar.gz
+	source = sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2::https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2
+	sha256sums = 2c336d12a1ea8b198b670b1360f48308966e80127977a151f87a7366f884ad25
+	sha256sums = c0bdb7907d3a74bba1d55d22bf4d9fa75586cf1530614ebe88a27b9118e015c4
+
+pkgname = hippo-dictate

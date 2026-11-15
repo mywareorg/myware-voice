@@ -137,9 +137,12 @@ unit buys restarts and journal history, and costs that line.
 config and the history stay unless `--purge` is given, because 640 MB is the
 expensive part of a setup.
 
-`packaging/PKGBUILD` is the AUR recipe, built from a tagged release with the
-sherpa runtime as a hashed second source. It is not submitted yet: that waits on
-a tag and a signing key.
+`packaging/PKGBUILD` is the AUR recipe: the tag's archive and the sherpa runtime
+as two hashed sources, `prepare()` refusing a tree whose `Cargo.toml` disagrees
+with `pkgver`, and `check()` running the test suite in the build directory. It
+builds and packages today (`makepkg --nodeps`), with `packaging/.SRCINFO`
+generated beside it. Submitting it to the AUR needs the maintainer's account and a
+key; the recipe itself is ready.
 
 ## Configuration
 

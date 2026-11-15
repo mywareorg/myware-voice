@@ -1,12 +1,12 @@
 # Maintainer: Sean Wu <sean@librewarelive.example>
 #
-# Not submitted to the AUR yet: it needs a tagged release to point `source` at,
-# and a signing key for the checksums. Everything below is what the submission
-# will be.
+# The sherpa-onnx runtime is a second source with the checksum from `sherpa.lock`,
+# rather than a script run in `prepare`: makepkg should see every download and
+# every hash in one place.
 #
-# The sherpa-onnx runtime is fetched as a second source with the checksum from
-# `sherpa.lock`, rather than by running `scripts/fetch-sherpa.sh` in `prepare`:
-# makepkg should see every download and every hash in one place.
+# The source is the tag's archive, not a branch. `pkgver` has to be bumped with
+# the tag, and `prepare` refuses a tree whose Cargo.toml disagrees, so a stale
+# number fails the build instead of shipping a package that calls itself 0.2.0.
 pkgname=hippo-dictate
 pkgver=0.2.0
 pkgrel=1
@@ -17,7 +17,7 @@ license=('LGPL-2.1-only')
 # The settings window is iced, which wants a Wayland client and xkbcommon at link
 # time; cpal wants ALSA. `wl-clipboard` is not optional: without wl-copy the
 # daemon refuses to record.
-depends=('wl-clipboard' 'libnotify' 'hicolor-icon-theme' 'alsa-lib' 'libxkbcommon' 'wayland')
+depends=('gcc-libs' 'wl-clipboard' 'libnotify' 'hicolor-icon-theme' 'alsa-lib' 'libxkbcommon' 'wayland')
 makedepends=('cargo' 'rust' 'pkgconf')
 optdepends=(
     'wtype: paste without uinput access'
@@ -28,15 +28,29 @@ source=(
     "sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2::https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2"
 )
 sha256sums=(
-    'SKIP'
+    '2c336d12a1ea8b198b670b1360f48308966e80127977a151f87a7366f884ad25'
     'c0bdb7907d3a74bba1d55d22bf4d9fa75586cf1530614ebe88a27b9118e015c4'
 )
 
+prepare() {
+    cd "$pkgname-v$pkgver"
+    if ! grep -q "^version = \"$pkgver\"$" Cargo.toml; then
+        error "Cargo.toml does not say version $pkgver; bump pkgver with the tag"
+        return 1
+    fi
+}
+
 build() {
     cd "$pkgname-v$pkgver"
-    # The workspace, not just the daemon: the tray launches the settings binary
-    # from the daemon's own directory.
+    # The workspace, not just the daemon: the tray launches the settings window
+    # from the daemon's own directory, and the popup is a second binary.
     cargo build --release --workspace --locked
+}
+
+check() {
+    cd "$pkgname-v$pkgver"
+    # No model and no microphone: every test that needs them uses a fake.
+    cargo test --workspace --locked
 }
 
 package() {
@@ -66,10 +80,10 @@ package() {
     done
 
     # The packaged unit runs the packaged binary, not the per-user install.
-    install -Dm 644 packaging/systemd/hippo-dictate.service \
+    install -Dm644 packaging/systemd/hippo-dictate.service \
         "$pkgdir/usr/lib/systemd/user/hippo-dictate.service"
     sed -i 's|%h/\.local/libexec/hippo-dictate/hippo-dictate|/usr/bin/hippo-dictate|' \
         "$pkgdir/usr/lib/systemd/user/hippo-dictate.service"
 
-    install -Dm 644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
