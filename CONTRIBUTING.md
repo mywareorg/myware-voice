@@ -48,11 +48,11 @@ These are load-bearing, and each of them has already cost time (see `AGENTS.md`)
 `cargo test` runs the unit tests and the integration tests in `tests/daemon.rs`.
 The integration tests drive the real binary through the seams it exposes:
 
-- `HIPPO_DICTATE_FAKE_AUDIO` / `HIPPO_DICTATE_FAKE_AUDIO_FAILS` — replay a WAV
+- `MYWARE_DICTATE_FAKE_AUDIO` / `MYWARE_DICTATE_FAKE_AUDIO_FAILS` — replay a WAV
   instead of opening a microphone.
-- `HIPPO_DICTATE_FAKE_MODEL` — a canned transcript, no model on disk.
-- `HIPPO_DICTATE_FAKE_DELIVERY` — skip the clipboard and the paste.
-- `HIPPO_DICTATE_CONFIG` — name the config file outright.
+- `MYWARE_DICTATE_FAKE_MODEL` — a canned transcript, no model on disk.
+- `MYWARE_DICTATE_FAKE_DELIVERY` — skip the clipboard and the paste.
+- `MYWARE_DICTATE_CONFIG` — name the config file outright.
 - `XDG_*` variables — isolate state, history and the socket.
 
 New behaviour needs a test at the seam where it can run headlessly. If it can
