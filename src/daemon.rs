@@ -63,14 +63,12 @@ fn fake_delivery_from(value: Option<&str>) -> bool {
 }
 
 fn fake_delivery() -> bool {
-    let value = std::env::var("HIPPO_DICTATE_FAKE_DELIVERY").ok();
+    let value = crate::compat::var("FAKE_DELIVERY");
     fake_delivery_from(value.as_deref())
 }
 
 fn fake_model() -> Option<String> {
-    std::env::var("HIPPO_DICTATE_FAKE_MODEL")
-        .ok()
-        .filter(|text| !text.is_empty())
+    crate::compat::var("FAKE_MODEL").filter(|text| !text.is_empty())
 }
 
 /// Report a problem to the terminal and to the log file.
@@ -1522,7 +1520,7 @@ pub fn run_process() -> Result<()> {
     ));
     // With a fake recognizer there is no model to find, which is how the daemon
     // is tested on a machine that has never downloaded one.
-    let model = if std::env::var_os("HIPPO_DICTATE_FAKE_MODEL").is_some() {
+    let model = if crate::compat::var_os("FAKE_MODEL").is_some() {
         PathBuf::new()
     } else {
         crate::model::resolve_dir()?
@@ -2073,7 +2071,7 @@ fn decoder_loop(
     generation: Arc<AtomicU64>,
     fake: Option<String>,
 ) {
-    let fake_decode = std::env::var("HIPPO_DICTATE_FAKE_DECODE").ok();
+    let fake_decode = crate::compat::var("FAKE_DECODE");
     let mut decoder = Decoder {
         loaded: None,
         model_dir: &model_dir,

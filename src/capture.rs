@@ -43,7 +43,7 @@ impl Recorder {
             let seconds = samples.len() as f32 / rate.max(1) as f32;
             // A test can ask for a device that dies immediately, which is how the
             // salvage path is exercised without unplugging anything.
-            let dropped = if std::env::var_os("HIPPO_DICTATE_FAKE_AUDIO_FAILS").is_some() {
+            let dropped = if crate::compat::var_os("FAKE_AUDIO_FAILS").is_some() {
                 Some("simulated device loss".to_string())
             } else {
                 None
@@ -236,7 +236,7 @@ fn explain(what: &str, error: anyhow::Error) -> anyhow::Error {
 
 /// A WAV to replay instead of the microphone. Tests only.
 fn fake_audio_path() -> Option<PathBuf> {
-    std::env::var_os("HIPPO_DICTATE_FAKE_AUDIO").map(PathBuf::from)
+    crate::compat::var_os("FAKE_AUDIO").map(PathBuf::from)
 }
 
 fn find_input(host: &cpal::Host, wanted: &str) -> Result<cpal::Device> {

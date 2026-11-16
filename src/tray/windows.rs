@@ -341,7 +341,7 @@ fn open_settings(pane: &str) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let mut command = std::process::Command::new(path);
-    command.env("HIPPO_DICTATE_START_PANE", pane);
+    command.env(crate::compat::env_name("START_PANE"), pane);
     command.creation_flags(CREATE_NO_WINDOW);
     crate::log::write(&format!("tray: opening settings for {pane}"));
     if let Err(error) = command.spawn() {

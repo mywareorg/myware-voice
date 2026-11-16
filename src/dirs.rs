@@ -12,8 +12,7 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 
-/// The app's directory name under each base.
-const APP: &str = "hippo-dictate";
+use crate::compat;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -62,12 +61,52 @@ fn family() -> Family {
 }
 
 fn resolve(kind: Kind) -> Result<PathBuf> {
-    resolve_for(family(), kind, &|key| std::env::var_os(key))
+    let env = |key: &str| std::env::var_os(key);
+    // The runtime directory is for sockets and short-lived files. Where there
+    // is none, the state directory is the nearest thing — resolved through the
+    // same adoption path, so it cannot point at a tree the app has moved away
+    // from.
+    if kind == Kind::Runtime && family() == Family::Xdg && env("XDG_RUNTIME_DIR").is_none() {
+        return resolve(Kind::State);
+    }
+    let root = root_from(family(), kind, &env)?;
+    Ok(with_cache_suffix(family(), kind, root))
+}
+
+/// Windows keeps its cache in a `cache` subdirectory of the app root; every
+/// other base directory is the root itself.
+fn with_cache_suffix(family: Family, kind: Kind, root: PathBuf) -> PathBuf {
+    if family == Family::Windows && kind == Kind::Cache {
+        root.join("cache")
+    } else {
+        root
+    }
+}
+
+/// The app root for `kind`, adopting a directory from a previous name when this
+/// generation has not written one yet.
+fn root_from(
+    family: Family,
+    kind: Kind,
+    env: &dyn Fn(&str) -> Option<OsString>,
+) -> Result<PathBuf> {
+    let current = resolve_for(family, kind, compat::APP, env)?;
+    if current.exists() {
+        return Ok(current);
+    }
+    for legacy_app in compat::LEGACY_APPS {
+        let legacy = resolve_for(family, kind, legacy_app, env)?;
+        if legacy.exists() {
+            return Ok(compat::adopt_dir(current, legacy));
+        }
+    }
+    Ok(current)
 }
 
 fn resolve_for(
     family: Family,
     kind: Kind,
+    app: &str,
     env: &dyn Fn(&str) -> Option<OsString>,
 ) -> Result<PathBuf> {
     match family {
@@ -76,12 +115,12 @@ fn resolve_for(
             // there is none, the state directory is the nearest thing.
             if kind == Kind::Runtime {
                 if let Some(dir) = env("XDG_RUNTIME_DIR") {
-                    return Ok(PathBuf::from(dir).join(APP));
+                    return Ok(PathBuf::from(dir).join(app));
                 }
-                return resolve_for(Family::Xdg, Kind::State, env);
+                return resolve_for(Family::Xdg, Kind::State, app, env);
             }
             if let Some(dir) = env(kind.xdg()) {
-                return Ok(PathBuf::from(dir).join(APP));
+                return Ok(PathBuf::from(dir).join(app));
             }
             let home = env("HOME")
                 .map(PathBuf::from)
@@ -90,7 +129,7 @@ fn resolve_for(
                 .home_relative()
                 .iter()
                 .fold(home, |path, part| path.join(part));
-            Ok(base.join(APP))
+            Ok(base.join(app))
         }
         Family::Windows => {
             let root = match kind {
@@ -105,12 +144,7 @@ fn resolve_for(
             .map(PathBuf::from)
             .ok_or_else(|| anyhow!("neither LOCALAPPDATA, APPDATA nor USERPROFILE is set"))?;
 
-            let base = root.join(APP);
-            Ok(if kind == Kind::Cache {
-                base.join("cache")
-            } else {
-                base
-            })
+            Ok(root.join(app))
         }
     }
 }
@@ -141,17 +175,19 @@ pub fn cache_dir() -> Result<PathBuf> {
 /// variables alone: a developer's environment would leak into the run. Naming
 /// the file directly is also the only way to move just the config and leave the
 /// log, socket and history where the rest of the suite expects them.
-const CONFIG_OVERRIDE: &str = "HIPPO_DICTATE_CONFIG";
-
 pub fn config_file() -> Result<PathBuf> {
     config_file_from(&|key| std::env::var_os(key))
 }
 
 fn config_file_from(env: &dyn Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
-    if let Some(path) = env(CONFIG_OVERRIDE) {
+    // Both generations of the name, so a test harness written against the old
+    // one keeps working.
+    if let Some(path) = env(&format!("{}_CONFIG", compat::PREFIX))
+        .or_else(|| env(&format!("{}_CONFIG", compat::LEGACY_PREFIX)))
+    {
         return Ok(PathBuf::from(path));
     }
-    Ok(resolve_for(family(), Kind::Config, env)?.join("config.toml"))
+    Ok(root_from(family(), Kind::Config, env)?.join("config.toml"))
 }
 
 pub fn log_file() -> Result<PathBuf> {
@@ -220,19 +256,19 @@ mod tests {
             ("HOME", "/home/me"),
         ]);
         assert_eq!(
-            resolve_for(Family::Xdg, Kind::Config, &env).unwrap(),
+            resolve_for(Family::Xdg, Kind::Config, compat::APP, &env).unwrap(),
             PathBuf::from("/xdg/config/hippo-dictate")
         );
         assert_eq!(
-            resolve_for(Family::Xdg, Kind::State, &env).unwrap(),
+            resolve_for(Family::Xdg, Kind::State, compat::APP, &env).unwrap(),
             PathBuf::from("/xdg/state/hippo-dictate")
         );
         assert_eq!(
-            resolve_for(Family::Xdg, Kind::Runtime, &env).unwrap(),
+            resolve_for(Family::Xdg, Kind::Runtime, compat::APP, &env).unwrap(),
             PathBuf::from("/xdg/run/hippo-dictate")
         );
         assert_eq!(
-            resolve_for(Family::Xdg, Kind::Cache, &env).unwrap(),
+            resolve_for(Family::Xdg, Kind::Cache, compat::APP, &env).unwrap(),
             PathBuf::from("/xdg/cache/hippo-dictate")
         );
     }
@@ -241,16 +277,16 @@ mod tests {
     fn home_is_the_unix_fallback() {
         let env = env_of(&[("HOME", "/home/me")]);
         assert_eq!(
-            resolve_for(Family::Xdg, Kind::Config, &env).unwrap(),
+            resolve_for(Family::Xdg, Kind::Config, compat::APP, &env).unwrap(),
             PathBuf::from("/home/me/.config/hippo-dictate")
         );
         assert_eq!(
-            resolve_for(Family::Xdg, Kind::Data, &env).unwrap(),
+            resolve_for(Family::Xdg, Kind::Data, compat::APP, &env).unwrap(),
             PathBuf::from("/home/me/.local/share/hippo-dictate")
         );
         // No runtime dir: the state directory stands in.
         assert_eq!(
-            resolve_for(Family::Xdg, Kind::Runtime, &env).unwrap(),
+            resolve_for(Family::Xdg, Kind::Runtime, compat::APP, &env).unwrap(),
             PathBuf::from("/home/me/.local/state/hippo-dictate")
         );
     }
@@ -281,22 +317,26 @@ mod tests {
             ("LOCALAPPDATA", r"C:\Users\me\AppData\Local"),
         ]);
         assert_eq!(
-            resolve_for(Family::Windows, Kind::Config, &env).unwrap(),
+            resolve_for(Family::Windows, Kind::Config, compat::APP, &env).unwrap(),
             PathBuf::from(r"C:\Users\me\AppData\Roaming").join("hippo-dictate")
         );
         assert_eq!(
-            resolve_for(Family::Windows, Kind::State, &env).unwrap(),
+            resolve_for(Family::Windows, Kind::State, compat::APP, &env).unwrap(),
             PathBuf::from(r"C:\Users\me\AppData\Local").join("hippo-dictate")
         );
         assert_eq!(
-            resolve_for(Family::Windows, Kind::Cache, &env).unwrap(),
+            with_cache_suffix(
+                Family::Windows,
+                Kind::Cache,
+                resolve_for(Family::Windows, Kind::Cache, compat::APP, &env).unwrap(),
+            ),
             PathBuf::from(r"C:\Users\me\AppData\Local")
                 .join("hippo-dictate")
                 .join("cache")
         );
         // HOME is irrelevant there, and its absence must not be an error.
         assert_eq!(
-            resolve_for(Family::Windows, Kind::Runtime, &env).unwrap(),
+            resolve_for(Family::Windows, Kind::Runtime, compat::APP, &env).unwrap(),
             PathBuf::from(r"C:\Users\me\AppData\Local").join("hippo-dictate")
         );
     }
@@ -305,12 +345,12 @@ mod tests {
     fn windows_falls_back_to_the_profile_and_fails_loudly_without_one() {
         let profile = env_of(&[("USERPROFILE", r"C:\Users\me")]);
         assert_eq!(
-            resolve_for(Family::Windows, Kind::Config, &profile).unwrap(),
+            resolve_for(Family::Windows, Kind::Config, compat::APP, &profile).unwrap(),
             PathBuf::from(r"C:\Users\me").join("hippo-dictate")
         );
 
         let empty = env_of(&[]);
-        let error = resolve_for(Family::Windows, Kind::State, &empty).unwrap_err();
+        let error = resolve_for(Family::Windows, Kind::State, compat::APP, &empty).unwrap_err();
         assert!(error.to_string().contains("LOCALAPPDATA"));
     }
 }

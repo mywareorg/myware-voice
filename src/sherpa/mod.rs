@@ -141,7 +141,8 @@ pub fn resolve_library_in(
     let name = library_file();
     let mut candidates = Vec::new();
 
-    if let Some(dir) = env("HIPPO_DICTATE_SHERPA_DIR") {
+    let sherpa_dir = crate::compat::env_name("SHERPA_DIR");
+    if let Some(dir) = env(&sherpa_dir) {
         let dir = PathBuf::from(dir);
         candidates.push(dir.join("lib").join(name));
         candidates.push(dir.join(name));
@@ -714,7 +715,7 @@ mod resolution {
         let expected = tree.touch(&format!("elsewhere/lib/{}", library_file()));
 
         let env = |key: &str| {
-            (key == "HIPPO_DICTATE_SHERPA_DIR").then(|| OsString::from(tree.0.join("elsewhere")))
+            (key == crate::compat::env_name("SHERPA_DIR")).then(|| OsString::from(tree.0.join("elsewhere")))
         };
         let found = resolve_library_in(&env, Some(&tree.0.join("app")), &tree.0.join("src"))
             .expect("resolve");
@@ -728,7 +729,7 @@ mod resolution {
             .expect_err("should not resolve");
         let text = error.to_string();
         assert!(text.contains("fetch-sherpa"), "{text}");
-        assert!(text.contains("HIPPO_DICTATE_SHERPA_DIR"), "{text}");
+        assert!(text.contains(&crate::compat::env_name("SHERPA_DIR")), "{text}");
     }
 
     /// Diagnostic for long dictation: confirms the online stream keeps
@@ -736,8 +737,8 @@ mod resolution {
     #[test]
     #[ignore = "needs HIPPO_DICTATE_STREAMING_MODEL_DIR and HIPPO_DICTATE_SMOKE_WAV"]
     fn the_online_recognizer_survives_a_long_stream() {
-        let dir = std::env::var("HIPPO_DICTATE_STREAMING_MODEL_DIR").expect("model dir");
-        let wav = std::env::var("HIPPO_DICTATE_SMOKE_WAV").expect("wav path");
+        let dir = crate::compat::var("STREAMING_MODEL_DIR").expect("model dir");
+        let wav = crate::compat::var("SMOKE_WAV").expect("wav path");
         let sherpa = Sherpa::open().expect("sherpa");
         let recognizer = Arc::new(
             sherpa
@@ -812,8 +813,8 @@ mod resolution {
     #[test]
     #[ignore = "needs HIPPO_DICTATE_STREAMING_MODEL_DIR and HIPPO_DICTATE_SMOKE_WAV"]
     fn the_online_recognizer_accepts_audio() {
-        let dir = std::env::var("HIPPO_DICTATE_STREAMING_MODEL_DIR").expect("model dir");
-        let wav = std::env::var("HIPPO_DICTATE_SMOKE_WAV").expect("wav path");
+        let dir = crate::compat::var("STREAMING_MODEL_DIR").expect("model dir");
+        let wav = crate::compat::var("SMOKE_WAV").expect("wav path");
         let sherpa = Sherpa::open().expect("sherpa");
         let recognizer = Arc::new(
             sherpa

@@ -98,7 +98,7 @@ impl Entitlement {
 
 /// The licence file, named outright by `HIPPO_DICTATE_LICENCE` in a test.
 pub fn path() -> anyhow::Result<PathBuf> {
-    if let Some(path) = std::env::var_os("HIPPO_DICTATE_LICENCE") {
+    if let Some(path) = crate::compat::var_os("LICENCE") {
         return Ok(PathBuf::from(path));
     }
     crate::dirs::licence_file()

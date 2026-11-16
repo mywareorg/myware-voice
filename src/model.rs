@@ -52,16 +52,16 @@ pub fn install_root() -> Result<PathBuf> {
 /// Installed packages win over the source tree, so a developer who has both does
 /// not silently run a stale vendored copy.
 pub fn resolve_dir() -> Result<PathBuf> {
-    resolve_locked(&lock()?, "HIPPO_DICTATE_MODEL_DIR")
+    resolve_locked(&lock()?, "MODEL_DIR")
 }
 
 /// The directory the streaming model should load from.
 pub fn streaming_dir() -> Result<PathBuf> {
-    resolve_locked(&streaming_lock()?, "HIPPO_DICTATE_STREAMING_MODEL_DIR")
+    resolve_locked(&streaming_lock()?, "STREAMING_MODEL_DIR")
 }
 
 fn resolve_locked(lock: &Lock, variable: &str) -> Result<PathBuf> {
-    if let Some(dir) = std::env::var_os(variable) {
+    if let Some(dir) = crate::compat::var_os(variable) {
         return Ok(PathBuf::from(dir));
     }
     let installed = install_root()?.join(&lock.dir);

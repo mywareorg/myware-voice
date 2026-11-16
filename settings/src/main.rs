@@ -1357,9 +1357,9 @@ fn tab_key(key: Key, modifiers: Modifiers) -> Option<Message> {
 /// Read and delete the pane the tray asked for, if any.
 /// The pane this process was asked for, from the environment a launcher sets.
 fn requested_pane() -> Pane {
-    match std::env::var("HIPPO_DICTATE_START_PANE").as_deref() {
-        Ok("history") => Pane::History,
-        Ok("text") => Pane::Text,
+    match hippo_dictate::compat::var("START_PANE").as_deref() {
+        Some("history") => Pane::History,
+        Some("text") => Pane::Text,
         _ => Pane::Dictation,
     }
 }

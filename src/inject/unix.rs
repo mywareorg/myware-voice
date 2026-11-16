@@ -231,7 +231,7 @@ pub fn unavailable() -> Option<String> {
     // The fake-delivery seam skips the clipboard and the paste entirely, which is
     // how the state machine is tested on a machine that has neither. Asking for
     // tools that run would never be used would fail every such test.
-    if std::env::var_os("HIPPO_DICTATE_FAKE_DELIVERY").is_some() {
+    if crate::compat::var_os("FAKE_DELIVERY").is_some() {
         return None;
     }
     if have("wl-copy") {
@@ -247,7 +247,7 @@ pub fn unavailable() -> Option<String> {
 
 /// The focused window, from whichever compositor can say.
 pub fn focus() -> Option<Focus> {
-    if let Some(spec) = std::env::var_os("HIPPO_DICTATE_FAKE_FOCUS") {
+    if let Some(spec) = crate::compat::var_os("FAKE_FOCUS") {
         return Some(parse_fake(&spec.to_string_lossy()));
     }
     match session() {

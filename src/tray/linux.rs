@@ -43,7 +43,7 @@ impl Hippo {
             let _ = std::fs::write(&path, pane);
         }
         let spawned = std::process::Command::new(binary)
-            .env("HIPPO_DICTATE_START_PANE", pane)
+            .env(crate::compat::env_name("START_PANE"), pane)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
