@@ -89,7 +89,7 @@ def main() -> None:
     parser.add_argument("--source", default="icons/microphone-icon-1024.png")
     parser.add_argument(
         "--hippo",
-        default="../hippo-transcribe/icons/simple-hippo-square-icon.png",
+        default="../myware-scribe/icons/simple-hippo-square-icon.png",
         help="the original hippo, downscaled for the settings header",
     )
     args = parser.parse_args()
