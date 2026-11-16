@@ -15,10 +15,10 @@ path = "src/main.rs"
 # only reason this binary depends on the daemon crate, and it never talks to the
 # running daemon over its socket.
 hippo-dictate = { path = ".." }
-# Pinned to a commit, not `branch = "main"`: the settings window is a separate
-# binary that no test builds, so a moving branch breaks it silently. Bump the
-# rev deliberately, with the build checked.
-hippo-ui = { git = "https://gitlab.com/librewarelive/hippo-ui", rev = "3b4253c222fb14d0110477a0655af219b547cf08", features = ["serde"] }
+# The sibling checkout, not a pinned git rev: the settings window is a separate
+# binary that no test builds, so a moving branch would break it silently. Keep
+# this pointed at the local `myware-ui` tree and build it when the UI crate moves.
+hippo-ui = { path = "../../myware-ui/crates/hippo-ui", features = ["serde"] }
 iced = { version = "0.13", features = ["tokio", "advanced", "image-without-codecs"] }
 # The window icon and the header mark arrive as PNG; decode them once rather
 # than enabling every codec iced would pull for `image`.
