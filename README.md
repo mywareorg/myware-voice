@@ -541,9 +541,9 @@ daemon watches the file, so there is no reload protocol to get wrong.
 cargo run -p myware-voice-settings
 ```
 
-It wears the original myware in the header and the microphone mark in the title
-bar. `scripts/make-app-icons.py` derives every shipped size from
-`icons/microphone-icon-1024.png`: the `.ico` frames, the taskbar bitmap and the
+It wears the MyWare monogram in the header and the same mark on its rounded-square
+field in the title bar. `scripts/make-app-icons.py` derives every shipped size
+from `icons/myware-voice-icons.svg`: the `.ico` frames, the taskbar bitmap and the
 Linux hicolor tree under `packaging/`.
 
 Three tabs: **Dictation** (input, delivery, activation), **Text** (every rule table

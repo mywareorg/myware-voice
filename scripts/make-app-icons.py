@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Render every icon size the app ships from the source illustration.
+"""Render every icon size the app ships from the source artwork.
 
-`icons/app.png` is the 1024 px scene and stays as it is, for docs and a future
-Store listing. It cannot be the executable icon: the wooden table fills the
-bottom half edge to edge, so at 16 px the app turns into a brown bar.
+The source is the corrected MyWare monogram (icons/myware-voice-icons.svg):
+a heavy square-shouldered M on a full-width blue baseline that ends in a
+green terminal, with equal optical margins on all four sides. Windows and
+Linux load the light rounded-square tile (22 % corner radius); only the
+settings header draws the mark bare, without the tile field.
 
-Everything Windows and Linux actually load is cut from the microphone capsule
-instead - grille, collar and red cross - which still reads at 16 px. The red
-cross sits at x 360-550, y 296-492; the crop below keeps it with room to spare.
+rsvg-convert does the rasterization; the hicolor ladder reaches 512 px, so
+regenerating needs it installed even though the committed outputs do not.
 
 Usage:
     python3 scripts/make-app-icons.py
@@ -16,12 +17,9 @@ Usage:
 import argparse
 from pathlib import Path
 
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
-
-# Capsule box in the 1024 px source. Below y=600 is table, which is excluded.
-CAPSULE = (250, 0, 780, 560)
 
 # Windows asks for these at 100 %, 125 %, 150 %, 200 % DPI; 20 and 40 are the
 # in-between frames that stop Explorer from resampling a neighbour.
@@ -29,39 +27,88 @@ ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 # The notification area asks for the small icon metric: 16, 20, 24 or 32.
 TRAY_SIZES = (16, 20, 24, 32)
 # freedesktop names 22 because some panels ask for it; 512 is the software
-# centre size. The capsule is 560 px square, so even 512 is a downscale.
+# centre size.
 HICOLOR_SIZES = (16, 22, 24, 32, 48, 64, 128, 256, 512)
 
-# The settings header draws at 28 logical px; 128 covers a 4x display.
+# The settings header draws the mark bare at 28 logical px; 128 covers a 4x
+# display.
 LOGO_SIZE = 128
 # The taskbar and Alt-Tab bitmap. One RGBA frame, the compositor scales it.
 WINDOW_ICON_SIZE = 256
 
+# The tile the product ships first: light field, matching the light palette.
+FIELD = (239, 240, 243, 255)  # EFF0F3
+# 226 px at 1024, matching the myware-ui 16 px radius at 72 px.
+RADIUS_RATIO = 226 / 1024
+MASTER_SIZE = 1024
+SUPERSAMPLE = 4
+# At or below this size a one-pixel dark rim keeps the light tile separated
+# from a light panel; both repositories draw the same keyline.
+KEYLINE_LIMIT = 32
+KEYLINE = (24, 32, 40, 255)
 
-def capsule(source: Image.Image) -> Image.Image:
-    """Cut the microphone head out of the scene and centre it on a square."""
-    cut = source.crop(CAPSULE)
-    side = max(cut.size)
-    canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-    canvas.alpha_composite(cut, ((side - cut.width) // 2, (side - cut.height) // 2))
-    return canvas
+
+def render_svg(path: Path, size: int) -> Image.Image:
+    """Rasterize the monogram with rsvg-convert at exactly `size`."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    rsvg = shutil.which("rsvg-convert")
+    if rsvg is None:
+        raise SystemExit(
+            f"{path.name} is SVG; install rsvg-convert (librsvg) to render it"
+        )
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        subprocess.run(
+            [rsvg, "-w", str(size), "-h", str(size), str(path), "-o", str(tmp_path)],
+            check=True,
+        )
+        return Image.open(tmp_path).convert("RGBA")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def rounded_mask(size: int) -> Image.Image:
+    """Supersampled rounded-square alpha mask, radius 22 % of the side."""
+    big = size * SUPERSAMPLE
+    mask = Image.new("L", (big, big), 0)
+    radius = round(big * RADIUS_RATIO)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [0, 0, big - 1, big - 1], radius=radius, fill=255
+    )
+    return mask.resize((size, size), Image.LANCZOS)
+
+
+def tile(mark: Image.Image, size: int) -> Image.Image:
+    """The monogram on its light rounded-square field, side `size`.
+
+    The monogram's own margins are the tile's padding, so the mark scales
+    with the field rather than inside it.
+    """
+    field = Image.new("RGBA", (size, size), FIELD)
+    field.alpha_composite(mark.resize((size, size), Image.LANCZOS))
+    return Image.composite(
+        field, Image.new("RGBA", (size, size)), rounded_mask(size)
+    )
 
 
 def render(mark: Image.Image, size: int) -> Image.Image:
-    """Downsample once, from the crop, never from a smaller sibling."""
-    return mark.resize((size, size), Image.LANCZOS)
+    """Downsample once, from the master, never from a smaller sibling."""
+    return tile(mark, size)
 
 
 def keyline(icon: Image.Image) -> Image.Image:
     """Give a small icon a one-pixel dark rim.
 
-    The microphone is mostly light grey, and a taskbar can be light grey too.
-    The artwork's own outlines are four pixels at 1024 and disappear below
-    32 px, so the rim is what separates the mark from the panel.
+    The field is #EFF0F3 and a taskbar or panel can be light grey too, so the
+    rim is what separates the tile from the surface it sits on.
     """
     alpha = icon.getchannel("A").point(lambda value: 255 if value > 24 else 0)
     alpha = alpha.filter(ImageFilter.MaxFilter(3))
-    rim = Image.new("RGBA", icon.size, (24, 32, 40, 255))
+    rim = Image.new("RGBA", icon.size, KEYLINE)
     rim.putalpha(alpha)
     rim.alpha_composite(icon)
     return rim
@@ -70,7 +117,7 @@ def keyline(icon: Image.Image) -> Image.Image:
 def frame(mark: Image.Image, size: int) -> Image.Image:
     """A rendered frame, keylined at the sizes a panel actually draws."""
     icon = render(mark, size)
-    return keyline(icon) if size <= 32 else icon
+    return keyline(icon) if size <= KEYLINE_LIMIT else icon
 
 
 def save_ico(frames: list[Image.Image], sizes, path: Path) -> None:
@@ -86,16 +133,10 @@ def save_ico(frames: list[Image.Image], sizes, path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", default="icons/microphone-icon-1024.png")
-    parser.add_argument(
-        "--myware",
-        default="../myware-scribe/icons/simple-myware-square-icon.png",
-        help="the original myware, downscaled for the settings header",
-    )
+    parser.add_argument("--source", default="icons/myware-voice-icons.svg")
     args = parser.parse_args()
 
-    source = Image.open(ROOT / args.source).convert("RGBA")
-    mark = capsule(source)
+    mark = render_svg(ROOT / args.source, MASTER_SIZE)
 
     icons = ROOT / "icons"
 
@@ -106,11 +147,9 @@ def main() -> None:
     save_ico([frame(mark, size) for size in ICO_SIZES], ICO_SIZES, icons / "app.ico")
     save_ico([frame(mark, size) for size in TRAY_SIZES], TRAY_SIZES, icons / "tray.ico")
 
-    # The header mark. It keeps its own rounded-square field, so it is not
-    # cropped and not masked.
-    myware = Image.open(ROOT / args.myware).convert("RGBA")
-    logo = myware.resize((LOGO_SIZE, LOGO_SIZE), Image.LANCZOS)
-    logo.save(icons / "myware.png")
+    # The header mark. It is drawn on the settings window's own surface, so it
+    # keeps no tile field: just the monogram on transparency.
+    mark.resize((LOGO_SIZE, LOGO_SIZE), Image.LANCZOS).save(icons / "myware.png")
     print(f"{icons / 'myware.png'}  {LOGO_SIZE}")
 
     hicolor = ROOT / "packaging" / "hicolor"
