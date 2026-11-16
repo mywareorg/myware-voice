@@ -2,7 +2,9 @@
 #
 # `check` compiles every workspace member on the host: formatting, lints, and the
 # settings window, which no test builds and which would otherwise rot against its
-# `myware-ui` dependency. It also type-checks the Windows target, which catches
+# `myware-ui` sibling. `settings/Cargo.toml` depends on that crate by path, so every
+# job clones the sibling repo before cargo runs; a checkout on its own cannot
+# resolve the manifest. It also type-checks the Windows target, which catches
 # `cfg(windows)` code that the GNU cross-build links but a MSVC user would hit
 # first. `check` does not link, so the missing linker on a Linux runner does not
 # matter, and `build.rs` is a no-op off Windows by design.
@@ -12,23 +14,37 @@
 # only job that proves `install.sh` has something to find.
 #
 # `windows-cross` cross-builds the shipped Windows executable on a Linux runner.
+# It does not repeat the host test run: `check` already ran the whole workspace.
 #
 # All Windows dependencies are pure Rust or windows-sys, so mingw can link the
 # binary. What this proves: the Windows target compiles and links reproducibly,
 # the ABI size assertions hold on the real target, and the resulting executable
 # does not lean on the mingw runtime DLLs. What it cannot prove: that the sherpa
 # DLLs load, that WASAPI capture works, or that SendInput reaches a window.
+#
+# Jobs run for merge requests, tags and the default branch. A push to `dev` costs
+# nothing; the merge request is the gate.
 stages:
   - check
   - build
   - package
 
+.ci-rules: &ci-rules
+  - if: $CI_COMMIT_TAG
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+default:
+  before_script:
+    - test -d ../myware-ui || git clone --depth 1 https://gitlab.com/mywareorg/myware-ui.git ../myware-ui
+
 check:
   stage: check
   image: rust:1-bookworm
   interruptible: true
+  rules: *ci-rules
   cache:
-    key: check
+    key: cargo-registry
     paths:
       - /usr/local/cargo/registry/
   script:
@@ -51,8 +67,9 @@ linux-release:
   stage: build
   image: rust:1-bookworm
   interruptible: true
+  rules: *ci-rules
   cache:
-    key: linux-release
+    key: cargo-registry
     paths:
       - /usr/local/cargo/registry/
   script:
@@ -109,6 +126,7 @@ windows-cross:
   stage: build
   image: rust:1-bookworm
   interruptible: true
+  rules: *ci-rules
   variables:
     # Statically link the CRT, so the exe does not need libgcc_s_seh-1.dll or
     # libwinpthread-1.dll on the user's machine. Scoped to the cross target so
@@ -116,7 +134,7 @@ windows-cross:
     CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS: "-C target-feature=+crt-static"
     SHERPA: sherpa-onnx-v1.13.8-win-x64-shared-MD-Release-no-tts-lib
   cache:
-    key: windows-cross-gnu
+    key: cargo-registry
     paths:
       - /usr/local/cargo/registry/
   script:
@@ -125,8 +143,6 @@ windows-cross:
     # Linux; the cross build does not, because it targets WASAPI.
     - apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 curl ca-certificates pkg-config libasound2-dev
     - rustup target add x86_64-pc-windows-gnu
-    # Tests run on the host: a Windows binary cannot execute on this runner.
-    - cargo test -p myware-voice
     # Only the daemon crate: the settings window pulls iced and wgpu, which are
     # built by scripts/build-windows.ps1 on a real Windows machine instead.
     - cargo build --release -p myware-voice --target x86_64-pc-windows-gnu
@@ -166,6 +182,7 @@ windows-msix:
   stage: package
   tags:
     - windows
+  before_script: []
   when: manual
   allow_failure: true
   interruptible: true
