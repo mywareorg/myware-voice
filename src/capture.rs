@@ -29,7 +29,7 @@ pub struct Recorder {
 impl Recorder {
     /// Open the named device, or the host default when `device` is `None`.
     ///
-    /// `HIPPO_DICTATE_FAKE_AUDIO` short-circuits this and replays a WAV instead,
+    /// `MYWARE_VOICE_FAKE_AUDIO` short-circuits this and replays a WAV instead,
     /// so the daemon's state machine can be tested with no microphone. It is an
     /// environment variable rather than a flag because a spawned daemon inherits
     /// the environment.

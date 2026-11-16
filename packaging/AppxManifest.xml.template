@@ -46,7 +46,7 @@
          own and is started at login by the startup task below. -->
     <Application
       Id="{{ApplicationId}}"
-      Executable="hippo-dictate-settings.exe"
+      Executable="myware-voice-settings.exe"
       EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="{{DisplayName}}"
@@ -66,10 +66,10 @@
       <Extensions>
         <uap5:Extension
           Category="windows.startupTask"
-          Executable="hippo-dictate-daemon.exe"
+          Executable="myware-voice-daemon.exe"
           EntryPoint="Windows.FullTrustApplication">
           <uap5:StartupTask
-            TaskId="HippoDictateDaemon"
+            TaskId="MyWareVoiceDaemon"
             Enabled="true"
             DisplayName="{{DisplayName}}" />
         </uap5:Extension>

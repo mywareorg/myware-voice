@@ -257,19 +257,19 @@ mod tests {
         ]);
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Config, compat::APP, &env).unwrap(),
-            PathBuf::from("/xdg/config/hippo-dictate")
+            PathBuf::from("/xdg/config/myware-voice")
         );
         assert_eq!(
             resolve_for(Family::Xdg, Kind::State, compat::APP, &env).unwrap(),
-            PathBuf::from("/xdg/state/hippo-dictate")
+            PathBuf::from("/xdg/state/myware-voice")
         );
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Runtime, compat::APP, &env).unwrap(),
-            PathBuf::from("/xdg/run/hippo-dictate")
+            PathBuf::from("/xdg/run/myware-voice")
         );
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Cache, compat::APP, &env).unwrap(),
-            PathBuf::from("/xdg/cache/hippo-dictate")
+            PathBuf::from("/xdg/cache/myware-voice")
         );
     }
 
@@ -278,23 +278,23 @@ mod tests {
         let env = env_of(&[("HOME", "/home/me")]);
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Config, compat::APP, &env).unwrap(),
-            PathBuf::from("/home/me/.config/hippo-dictate")
+            PathBuf::from("/home/me/.config/myware-voice")
         );
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Data, compat::APP, &env).unwrap(),
-            PathBuf::from("/home/me/.local/share/hippo-dictate")
+            PathBuf::from("/home/me/.local/share/myware-voice")
         );
         // No runtime dir: the state directory stands in.
         assert_eq!(
             resolve_for(Family::Xdg, Kind::Runtime, compat::APP, &env).unwrap(),
-            PathBuf::from("/home/me/.local/state/hippo-dictate")
+            PathBuf::from("/home/me/.local/state/myware-voice")
         );
     }
 
     #[test]
     fn config_override_names_the_file_itself() {
         let env = env_of(&[
-            ("HIPPO_DICTATE_CONFIG", "/tmp/elsewhere/config.toml"),
+            ("MYWARE_VOICE_CONFIG", "/tmp/elsewhere/config.toml"),
             ("XDG_CONFIG_HOME", "/xdg/config"),
         ]);
         assert_eq!(
@@ -305,7 +305,7 @@ mod tests {
         let plain = env_of(&[("XDG_CONFIG_HOME", "/xdg/config")]);
         assert_eq!(
             config_file_from(&plain).unwrap(),
-            PathBuf::from("/xdg/config/hippo-dictate/config.toml")
+            PathBuf::from("/xdg/config/myware-voice/config.toml")
         );
     }
 
@@ -318,11 +318,11 @@ mod tests {
         ]);
         assert_eq!(
             resolve_for(Family::Windows, Kind::Config, compat::APP, &env).unwrap(),
-            PathBuf::from(r"C:\Users\me\AppData\Roaming").join("hippo-dictate")
+            PathBuf::from(r"C:\Users\me\AppData\Roaming").join("myware-voice")
         );
         assert_eq!(
             resolve_for(Family::Windows, Kind::State, compat::APP, &env).unwrap(),
-            PathBuf::from(r"C:\Users\me\AppData\Local").join("hippo-dictate")
+            PathBuf::from(r"C:\Users\me\AppData\Local").join("myware-voice")
         );
         assert_eq!(
             with_cache_suffix(
@@ -331,13 +331,13 @@ mod tests {
                 resolve_for(Family::Windows, Kind::Cache, compat::APP, &env).unwrap(),
             ),
             PathBuf::from(r"C:\Users\me\AppData\Local")
-                .join("hippo-dictate")
+                .join("myware-voice")
                 .join("cache")
         );
         // HOME is irrelevant there, and its absence must not be an error.
         assert_eq!(
             resolve_for(Family::Windows, Kind::Runtime, compat::APP, &env).unwrap(),
-            PathBuf::from(r"C:\Users\me\AppData\Local").join("hippo-dictate")
+            PathBuf::from(r"C:\Users\me\AppData\Local").join("myware-voice")
         );
     }
 
@@ -346,7 +346,7 @@ mod tests {
         let profile = env_of(&[("USERPROFILE", r"C:\Users\me")]);
         assert_eq!(
             resolve_for(Family::Windows, Kind::Config, compat::APP, &profile).unwrap(),
-            PathBuf::from(r"C:\Users\me").join("hippo-dictate")
+            PathBuf::from(r"C:\Users\me").join("myware-voice")
         );
 
         let empty = env_of(&[]);

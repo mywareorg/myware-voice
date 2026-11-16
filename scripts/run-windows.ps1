@@ -3,7 +3,7 @@
 #
 # One command for development: enters the Visual Studio developer environment
 # when link.exe is missing, fetches the native runtime if it is absent, checks
-# the speech model, then runs `cargo run --bin hippo-dictate-daemon`. The daemon is
+# the speech model, then runs `cargo run --bin myware-voice-daemon`. The daemon is
 # a GUI-subsystem binary, so it leaves no console window behind; this terminal
 # stays attached to cargo and the tray icon is the app's only surface.
 #
@@ -95,7 +95,7 @@ function Add-RunError {
         [Parameter(Mandatory = $true)][string]$Message,
         [string[]]$SourceLog
     )
-    $target = Join-Path $root 'hippo-dictate-error.log'
+    $target = Join-Path $root 'myware-voice-error.log'
     Add-Content -LiteralPath $target -Value ''
     Add-Content -LiteralPath $target -Value "=== $Message at $(Get-Date -Format o) ==="
     foreach ($file in @($SourceLog)) {
@@ -178,13 +178,13 @@ try {
 
     Write-Host ''
     Write-Host 'starting the tray daemon - left click for settings, ctrl+space to dictate'
-    Write-Host "log: $env:LOCALAPPDATA\hippo-dictate\log"
+    Write-Host "log: $env:LOCALAPPDATA\myware-voice\log"
     Write-Host ''
 
     # A daemon from an installed copy starts at login and owns the endpoint.
     # Starting a dev build beside it fails immediately, and the GUI daemon used
     # to fail silently; say which process is in the way instead.
-    $endpoint = Join-Path $env:LOCALAPPDATA 'hippo-dictate\endpoint'
+    $endpoint = Join-Path $env:LOCALAPPDATA 'myware-voice\endpoint'
     if (Test-Path -LiteralPath $endpoint) {
         $port = (Get-Content -LiteralPath $endpoint -TotalCount 1).Trim()
         if ($port -match '^\d+$') {
@@ -194,13 +194,13 @@ try {
                 if ($task.Wait(300) -and $client.Connected) {
                     if ($Force) {
                         Write-Host "stopping the daemon on 127.0.0.1:$port"
-                        Get-Process -Name 'hippo-dictate-daemon' `
+                        Get-Process -Name 'myware-voice-daemon' `
                             -ErrorAction SilentlyContinue |
                             Stop-Process -Force
                         Start-Sleep -Milliseconds 500
                     } else {
                         Write-Warning "a daemon is already listening on 127.0.0.1:$port."
-                        Write-Warning 'Quit it from its tray icon, or run `hippo-dictate quit`, before starting a development build (or pass -Force).'
+                        Write-Warning 'Quit it from its tray icon, or run `myware-voice quit`, before starting a development build (or pass -Force).'
                         return
                     }
                 }
@@ -213,9 +213,9 @@ try {
     }
 
     # The settings window is a separate process and can outlive the daemon.
-    # Windows then refuses to replace target\debug\hippo-dictate-settings.exe and
+    # Windows then refuses to replace target\debug\myware-voice-settings.exe and
     # cargo reports "failed to remove file" instead of naming the cause.
-    $blocking = @(Get-Process -Name 'hippo-dictate-daemon', 'hippo-dictate-settings' `
+    $blocking = @(Get-Process -Name 'myware-voice-daemon', 'myware-voice-settings' `
         -ErrorAction SilentlyContinue)
     if ($blocking.Count -gt 0) {
         $list = ($blocking | ForEach-Object { "$($_.ProcessName) ($($_.Id))" }) -join ', '
@@ -231,11 +231,11 @@ try {
         }
     }
 
-    $cargoArgs = @('run', '--bin', 'hippo-dictate-daemon')
-    if ($Release) { $cargoArgs = @('run', '--release', '--bin', 'hippo-dictate-daemon') }
+    $cargoArgs = @('run', '--bin', 'myware-voice-daemon')
+    if ($Release) { $cargoArgs = @('run', '--release', '--bin', 'myware-voice-daemon') }
     $cargo = (Get-Command cargo).Source
 
-    # The daemon launches hippo-dictate-settings.exe from its own directory, and
+    # The daemon launches myware-voice-settings.exe from its own directory, and
     # `cargo run --bin` builds only the daemon. Without this, left click finds no
     # settings binary and the tray silently does nothing.
     #
@@ -273,7 +273,7 @@ try {
 
     & cargo @cargoArgs
     if ($LASTEXITCODE -ne 0) {
-        $log = Join-Path $env:LOCALAPPDATA 'hippo-dictate\log'
+        $log = Join-Path $env:LOCALAPPDATA 'myware-voice\log'
         Write-Host ''
         Write-Warning "cargo run exited with code $LASTEXITCODE"
         if (Test-Path -LiteralPath $log) {

@@ -8,11 +8,11 @@
 # Extraction is the awkward part. Windows' built-in tar is bsdtar without bzip2,
 # so the order is: an installed 7-Zip, then Git for Windows' bzip2 driving tar,
 # then a standalone 7-Zip downloaded to the cache. The same chain is used by
-# hippo-transcribe's Windows build.
+# myware-scribe's Windows build.
 #
 # Usage:
 #   .\scripts\fetch-sherpa.ps1
-#   .\scripts\fetch-sherpa.ps1 -Dest D:\hippo\vendor
+#   .\scripts\fetch-sherpa.ps1 -Dest D:\myware\vendor
 [CmdletBinding()]
 param(
     [string]$Dest
@@ -164,7 +164,7 @@ if (Test-Path -LiteralPath $dll) {
 
 # The extractor lives outside the checkout so it survives a clean of vendor\.
 $cacheRoot = if ($env:LOCALAPPDATA) {
-    Join-Path $env:LOCALAPPDATA 'hippo-dictate\cache'
+    Join-Path $env:LOCALAPPDATA 'myware-voice\cache'
 } else {
     Join-Path $Dest 'cache'
 }
@@ -208,4 +208,4 @@ foreach ($name in @('sherpa-onnx-c-api.dll', 'onnxruntime.dll')) {
 }
 
 Write-Host "sherpa-onnx $version ready: $libDir"
-Write-Host "copy $libDir\*.dll beside hippo-dictate.exe, or set HIPPO_DICTATE_SHERPA_DIR"
+Write-Host "copy $libDir\*.dll beside myware-voice.exe, or set MYWARE_VOICE_SHERPA_DIR"

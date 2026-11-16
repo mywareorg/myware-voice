@@ -88,9 +88,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", default="icons/microphone-icon-1024.png")
     parser.add_argument(
-        "--hippo",
-        default="../myware-scribe/icons/simple-hippo-square-icon.png",
-        help="the original hippo, downscaled for the settings header",
+        "--myware",
+        default="../myware-scribe/icons/simple-myware-square-icon.png",
+        help="the original myware, downscaled for the settings header",
     )
     args = parser.parse_args()
 
@@ -108,16 +108,16 @@ def main() -> None:
 
     # The header mark. It keeps its own rounded-square field, so it is not
     # cropped and not masked.
-    hippo = Image.open(ROOT / args.hippo).convert("RGBA")
-    logo = hippo.resize((LOGO_SIZE, LOGO_SIZE), Image.LANCZOS)
-    logo.save(icons / "hippo.png")
-    print(f"{icons / 'hippo.png'}  {LOGO_SIZE}")
+    myware = Image.open(ROOT / args.myware).convert("RGBA")
+    logo = myware.resize((LOGO_SIZE, LOGO_SIZE), Image.LANCZOS)
+    logo.save(icons / "myware.png")
+    print(f"{icons / 'myware.png'}  {LOGO_SIZE}")
 
     hicolor = ROOT / "packaging" / "hicolor"
     for size in HICOLOR_SIZES:
         target = hicolor / f"{size}x{size}" / "apps"
         target.mkdir(parents=True, exist_ok=True)
-        frame(mark, size).save(target / "hippo-dictate.png")
+        frame(mark, size).save(target / "myware-voice.png")
     print(f"{hicolor}  {', '.join(str(size) for size in HICOLOR_SIZES)}")
 
 

@@ -257,7 +257,7 @@ pub fn focus() -> Option<Focus> {
     }
 }
 
-/// `app_id:window_id`, the form `HIPPO_DICTATE_FAKE_FOCUS` takes. A spec without a
+/// `app_id:window_id`, the form `MYWARE_VOICE_FAKE_FOCUS` takes. A spec without a
 /// colon has no window id, which is the "provider that only knows the
 /// application" case.
 fn parse_fake(spec: &str) -> Focus {
@@ -357,7 +357,7 @@ pub fn notify(summary: &str, body: &str) {
         return;
     }
     let _ = Command::new("notify-send")
-        .args(["-a", "hippo-dictate", summary, body])
+        .args(["-a", "myware-voice", summary, body])
         .status();
 }
 

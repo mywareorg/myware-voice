@@ -81,7 +81,7 @@ pub fn spawn(status: Arc<Mutex<Status>>) -> Result<()> {
 fn run(status: Arc<Mutex<Status>>) -> Result<()> {
     unsafe {
         let instance = GetModuleHandleW(std::ptr::null());
-        let class_name = wide("HippoVoiceOverlay");
+        let class_name = wide("MyWareVoiceOverlay");
 
         let class = WNDCLASSW {
             lpfnWndProc: Some(window_proc),

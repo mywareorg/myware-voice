@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=Hippo Dictate
+Name=MyWare Voice
 GenericName=Dictation
 Comment=Push-to-talk dictation. This opens the settings; the daemon is started by the keybind.
-Exec=hippo-dictate-settings
-Icon=hippo-dictate
+Exec=myware-voice-settings
+Icon=myware-voice
 Terminal=false
 Categories=Utility;Accessibility;
 Keywords=dictation;speech;voice;transcribe;microphone;

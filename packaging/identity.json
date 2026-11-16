@@ -1,10 +1,10 @@
 {
   "_comment": "For sideloading, not the Store. The Store would supply these; a self-signed package only needs Publisher to match the signing certificate's subject exactly, which make-test-cert.ps1 reads from here.",
-  "packageName": "SeanWu.HippoDictate",
-  "publisher": "CN=Hippo Dictate Test",
+  "packageName": "SeanWu.MyWareVoice",
+  "publisher": "CN=MyWare Voice Test",
   "publisherDisplayName": "Sean Wu",
-  "displayName": "Hippo Dictate",
+  "displayName": "MyWare Voice",
   "description": "Push-to-talk dictation. Local-only, no accounts, no telemetry.",
-  "applicationId": "HippoDictate",
+  "applicationId": "MyWareVoice",
   "backgroundColor": "#202329"
 }

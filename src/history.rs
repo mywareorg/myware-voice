@@ -3,7 +3,7 @@
 //! Off by default: the premise of the app is that transcripts stay where the user
 //! puts them, so keeping them on disk is a decision. When it is on, entries are
 //! tab-separated epoch seconds and text, pruned by age after every append, and
-//! read back here for the history pane and for `hippo-dictate history`.
+//! read back here for the history pane and for `myware-voice history`.
 
 use std::path::{Path, PathBuf};
 
@@ -117,7 +117,7 @@ mod tests {
 
     fn temp(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
-            "hippo-dictate-history-{name}-{}.tsv",
+            "myware-voice-history-{name}-{}.tsv",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);

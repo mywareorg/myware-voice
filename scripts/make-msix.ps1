@@ -14,7 +14,7 @@
   use, on someone else's machine.
 
 .PARAMETER Stage
-  Directory holding hippo-dictate*.exe and the sherpa/VC runtime DLLs.
+  Directory holding myware-voice*.exe and the sherpa/VC runtime DLLs.
 
 .PARAMETER OutDir
   Where the .msix, its .sha256 and the .pfx are written.
@@ -29,8 +29,8 @@
   Signing certificate. Omit to leave the package unsigned.
 
 .EXAMPLE
-  .\scripts\make-msix.ps1 -Stage dist\hippo-dictate-0.2.0-win-x64 `
-      -OutDir dist -Name hippo-dictate-0.2.0-win-x64 -Version 0.2.0
+  .\scripts\make-msix.ps1 -Stage dist\myware-voice-0.2.0-win-x64 `
+      -OutDir dist -Name myware-voice-0.2.0-win-x64 -Version 0.2.0
 #>
 [CmdletBinding()]
 param(
@@ -39,8 +39,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$OutDir = "dist",
     [string]$IdentityPath = "packaging\identity.json",
-    [string]$PfxPath = "dist\hippo-dictate-test.pfx",
-    [string]$Password = "hippo-dictate-test",
+    [string]$PfxPath = "dist\myware-voice-test.pfx",
+    [string]$Password = "myware-voice-test",
     [switch]$NoCertificate,
     [switch]$KeepLayout
 )
@@ -85,7 +85,7 @@ New-Item -ItemType Directory -Path $layout -Force | Out-Null
 Write-Step "laying out the package"
 # The three Windows executables and their runtime. The overlay is Linux-only and
 # builds as an empty stub elsewhere, so it is not shipped here.
-foreach ($exe in @("hippo-dictate.exe", "hippo-dictate-daemon.exe", "hippo-dictate-settings.exe")) {
+foreach ($exe in @("myware-voice.exe", "myware-voice-daemon.exe", "myware-voice-settings.exe")) {
     Copy-Item -LiteralPath (Join-Path $Stage $exe) $layout
 }
 # sherpa-onnx-c-api.dll resolves onnxruntime.dll from the application directory,
@@ -147,7 +147,7 @@ $verify = Join-Path $work "verify"
 if ($LASTEXITCODE -ne 0) { throw "makeappx unpack failed with $LASTEXITCODE" }
 $packed = Get-ChildItem -LiteralPath $verify -Recurse -File |
     ForEach-Object { $_.FullName.Substring((Resolve-Path $verify).Path.Length).TrimStart('\') }
-foreach ($required in @("hippo-dictate.exe", "hippo-dictate-daemon.exe", "hippo-dictate-settings.exe",
+foreach ($required in @("myware-voice.exe", "myware-voice-daemon.exe", "myware-voice-settings.exe",
         "AppxManifest.xml", "resources.pri", "sherpa-onnx-c-api.dll", "onnxruntime.dll",
         "Assets\StoreLogo.png", "LICENSE")) {
     if ($packed -notcontains $required) { throw "$required is required in the package but is not in it" }

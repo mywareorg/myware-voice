@@ -20,11 +20,11 @@ use crate::daemon::Event;
 
 /// The item the shell talks to. It holds only what the menu callbacks need.
 #[derive(Debug)]
-struct Hippo {
+struct MyWare {
     events: Sender<Event>,
 }
 
-impl Hippo {
+impl MyWare {
     /// Open the settings window, or the history pane of it.
     ///
     /// A request file is what a running window reads to switch panes; a window
@@ -33,7 +33,7 @@ impl Hippo {
     /// raises that window instead of stacking another.
     fn open(&self, pane: &str) {
         let Some(binary) = settings_binary() else {
-            crate::log::error("tray: hippo-dictate-settings not found; cannot open the window");
+            crate::log::error("tray: myware-voice-settings not found; cannot open the window");
             return;
         };
         if let Ok(path) = crate::dirs::settings_request_file() {
@@ -56,20 +56,20 @@ impl Hippo {
     }
 }
 
-impl ksni::Tray for Hippo {
+impl ksni::Tray for MyWare {
     fn id(&self) -> String {
-        "hippo-dictate".to_string()
+        "myware-voice".to_string()
     }
 
     fn title(&self) -> String {
-        "Hippo Dictate".to_string()
+        "MyWare Voice".to_string()
     }
 
     /// The name the icon theme is asked for, which is what `install.sh` puts under
     /// `hicolor`. A development checkout that has installed nothing shows the
     /// host's fallback icon rather than no icon.
     fn icon_name(&self) -> String {
-        "hippo-dictate".to_string()
+        "myware-voice".to_string()
     }
 
     /// Left click, which is what everyone tries first.
@@ -119,11 +119,11 @@ fn settings_binary() -> Option<PathBuf> {
     let sibling = std::env::current_exe()
         .ok()?
         .parent()?
-        .join("hippo-dictate-settings");
+        .join("myware-voice-settings");
     if sibling.is_file() {
         return Some(sibling);
     }
-    crate::inject::find("hippo-dictate-settings")
+    crate::inject::find("myware-voice-settings")
 }
 
 /// Start the tray in the background. Never fails the daemon.
@@ -136,7 +136,7 @@ pub fn spawn(events: Sender<Event>) -> Result<()> {
             // is half a minute. One cheap D-Bus attempt a second, and nothing at
             // all once it succeeds.
             for attempt in 1..=30 {
-                match (Hippo {
+                match (MyWare {
                     events: events.clone(),
                 })
                 .spawn()

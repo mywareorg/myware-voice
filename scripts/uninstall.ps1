@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# Remove hippo-dictate for the current user.
+# Remove myware-voice for the current user.
 #
 # Stops the daemon, removes the start-up entry, the user PATH entry, the program
 # folder, and - after asking - the downloaded model and the local state.
@@ -15,13 +15,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$target = Join-Path $env:LOCALAPPDATA 'Programs\hippo-dictate'
-$state = Join-Path $env:LOCALAPPDATA 'hippo-dictate'
-$config = Join-Path $env:APPDATA 'hippo-dictate'
-$client = Join-Path $target 'hippo-dictate.exe'
+$target = Join-Path $env:LOCALAPPDATA 'Programs\myware-voice'
+$state = Join-Path $env:LOCALAPPDATA 'myware-voice'
+$config = Join-Path $env:APPDATA 'myware-voice'
+$client = Join-Path $target 'myware-voice.exe'
 
 if (-not $Force) {
-    $answer = Read-Host "Remove hippo-dictate from $target? [y/N]"
+    $answer = Read-Host "Remove myware-voice from $target? [y/N]"
     if ($answer -notmatch '^(y|yes)$') {
         Write-Host 'cancelled'
         exit 0
@@ -34,7 +34,7 @@ if (Test-Path -LiteralPath $client) {
 }
 
 Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' `
-    -Name 'HippoVoice' -ErrorAction SilentlyContinue
+    -Name 'MyWareVoice' -ErrorAction SilentlyContinue
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($userPath) {
@@ -77,4 +77,4 @@ if (Test-Path -LiteralPath $config) {
     Write-Host "removed $config"
 }
 
-Write-Host 'hippo-dictate is uninstalled'
+Write-Host 'myware-voice is uninstalled'

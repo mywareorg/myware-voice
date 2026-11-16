@@ -109,7 +109,7 @@ fn library_file() -> &'static str {
 
 /// Find the runtime, in the same order `doctor` reports.
 ///
-/// 1. `HIPPO_DICTATE_SHERPA_DIR`
+/// 1. `MYWARE_VOICE_SHERPA_DIR`
 /// 2. `lib/` beside the executable
 /// 3. `vendor/sherpa/lib` relative to the source tree, for development
 pub fn resolve_library() -> Result<PathBuf> {
@@ -126,7 +126,7 @@ pub fn resolve_library() -> Result<PathBuf> {
 /// The search order, with its inputs passed in so every layout can be tested on
 /// any host:
 ///
-/// 1. `HIPPO_DICTATE_SHERPA_DIR`, an explicit override for a hand-placed runtime
+/// 1. `MYWARE_VOICE_SHERPA_DIR`, an explicit override for a hand-placed runtime
 /// 2. beside the executable, which is where the release folder puts it
 /// 3. the executable's `lib/`
 /// 4. `vendor/sherpa/lib` in the source tree, for development
@@ -160,7 +160,7 @@ pub fn resolve_library_in(
         .ok_or_else(|| {
             anyhow!(
                 "sherpa-onnx runtime not found; run scripts/fetch-sherpa.sh \
-                 or set HIPPO_DICTATE_SHERPA_DIR"
+                 or set MYWARE_VOICE_SHERPA_DIR"
             )
         })
 }
@@ -646,7 +646,7 @@ mod resolution {
     impl Tree {
         fn new(name: &str) -> Self {
             let root = std::env::temp_dir().join(format!(
-                "hippo-dictate-sherpa-{name}-{}",
+                "myware-voice-sherpa-{name}-{}",
                 std::process::id()
             ));
             let _ = fs::remove_dir_all(&root);
@@ -735,7 +735,7 @@ mod resolution {
     /// Diagnostic for long dictation: confirms the online stream keeps
     /// producing a prefix-stable hypothesis and endpoints on its own.
     #[test]
-    #[ignore = "needs HIPPO_DICTATE_STREAMING_MODEL_DIR and HIPPO_DICTATE_SMOKE_WAV"]
+    #[ignore = "needs MYWARE_VOICE_STREAMING_MODEL_DIR and MYWARE_VOICE_SMOKE_WAV"]
     fn the_online_recognizer_survives_a_long_stream() {
         let dir = crate::compat::var("STREAMING_MODEL_DIR").expect("model dir");
         let wav = crate::compat::var("SMOKE_WAV").expect("wav path");
@@ -811,7 +811,7 @@ mod resolution {
     /// a WAV, so it is the one test that exercises the online C API and its
     /// struct layouts. Run with both variables set and `--ignored`.
     #[test]
-    #[ignore = "needs HIPPO_DICTATE_STREAMING_MODEL_DIR and HIPPO_DICTATE_SMOKE_WAV"]
+    #[ignore = "needs MYWARE_VOICE_STREAMING_MODEL_DIR and MYWARE_VOICE_SMOKE_WAV"]
     fn the_online_recognizer_accepts_audio() {
         let dir = crate::compat::var("STREAMING_MODEL_DIR").expect("model dir");
         let wav = crate::compat::var("SMOKE_WAV").expect("wav path");

@@ -5,18 +5,18 @@
 //! watches the file and applies what it finds on its next capture, which is why
 //! there is no reload protocol to keep in step.
 
-use hippo_dictate::capture;
-use hippo_dictate::chord::Chord;
-use hippo_dictate::config::{Clipboard, Config, PasteMethod};
-use hippo_dictate::history;
-use hippo_dictate::model;
-use hippo_dictate::ollama;
-use hippo_dictate::suggest::{self, Kind, Proposal};
-use hippo_dictate::text as rules;
-use hippo_ui::buttons::{icon_colored, labelled};
-use hippo_ui::rows::{settings_divider, settings_row, switch_row};
-use hippo_ui::styles::*;
-use hippo_ui::tokens::{self, AppTheme, Scheme};
+use myware_voice::capture;
+use myware_voice::chord::Chord;
+use myware_voice::config::{Clipboard, Config, PasteMethod};
+use myware_voice::history;
+use myware_voice::model;
+use myware_voice::ollama;
+use myware_voice::suggest::{self, Kind, Proposal};
+use myware_voice::text as rules;
+use myware_ui::buttons::{icon_colored, labelled};
+use myware_ui::rows::{settings_divider, settings_row, switch_row};
+use myware_ui::styles::*;
+use myware_ui::tokens::{self, AppTheme, Scheme};
 use iced::keyboard::{key::Named, Key, Modifiers};
 use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{font, Element, Font, Length, Task};
@@ -31,7 +31,7 @@ const CHUNKS: [&str; 4] = ["10 s", "15 s", "20 s", "30 s"];
 const STREAM_CHUNKS: [&str; 5] = ["1.0 s", "1.5 s", "2.0 s", "3.0 s", "5.0 s"];
 const STREAM_SEGMENTS: [&str; 4] = ["5 s", "8 s", "12 s", "20 s"];
 
-/// The header mark, in logical pixels, matching the size Hippo Transcribe uses so
+/// The header mark, in logical pixels, matching the size MyWare Scribe uses so
 /// the two windows read as one family. The source is 128 px, which is sharp at
 /// 1x and marginal at 2x.
 const HEADER_LOGO_SIZE: f32 = 67.0;
@@ -41,7 +41,7 @@ fn main() -> iced::Result {
     // otherwise disappear with the console.
     let result = run();
     if let Err(error) = &result {
-        hippo_dictate::log::error(&format!("settings: {error}"));
+        myware_voice::log::error(&format!("settings: {error}"));
     }
     result
 }
@@ -73,10 +73,10 @@ fn run() -> iced::Result {
         // the single-instance handshake matches, and what a user's own rule should
         // match. Left empty, `[app_id=...]` matches nothing and the raise is a
         // no-op that looks like a bug in the handshake.
-        window.platform_specific.application_id = "hippo-dictate-settings".to_string();
+        window.platform_specific.application_id = "myware-voice-settings".to_string();
     }
 
-    iced::application("Hippo Dictate", Settings::update, Settings::view)
+    iced::application("MyWare Voice", Settings::update, Settings::view)
         .theme(|state: &Settings| state.mode.iced())
         .font(include_bytes!("../assets/bootstrap-icons.ttf").as_slice())
         .window(window)
@@ -218,7 +218,7 @@ impl Settings {
         devices.extend(capture::input_devices().unwrap_or_default());
 
         // Presence only, not hashes: boot must not block the first frame on 640 MB
-        // of SHA-256. `hippo-dictate model verify` is the command that hashes.
+        // of SHA-256. `myware-voice model verify` is the command that hashes.
         let model_state = match model::resolve_dir() {
             Ok(dir) => match model::inspect(&dir, false) {
                 Ok(rows)
@@ -375,7 +375,7 @@ impl Settings {
                     snippet.text = text;
                 }
             }
-            Message::AddSnippet => self.config.snippets.push(hippo_dictate::config::Snippet {
+            Message::AddSnippet => self.config.snippets.push(myware_voice::config::Snippet {
                 trigger: String::new(),
                 text: String::new(),
             }),
@@ -397,7 +397,7 @@ impl Settings {
             Message::AddReplacement => {
                 self.config
                     .replacements
-                    .push(hippo_dictate::config::Replacement {
+                    .push(myware_voice::config::Replacement {
                         from: String::new(),
                         to: String::new(),
                     })
@@ -471,13 +471,13 @@ impl Settings {
                             Kind::Replacement => {
                                 self.config
                                     .replacements
-                                    .push(hippo_dictate::config::Replacement {
+                                    .push(myware_voice::config::Replacement {
                                         from: proposal.say,
                                         to: proposal.becomes,
                                     })
                             }
                             Kind::Snippet => {
-                                self.config.snippets.push(hippo_dictate::config::Snippet {
+                                self.config.snippets.push(myware_voice::config::Snippet {
                                     trigger: proposal.say,
                                     text: proposal.becomes,
                                 })
@@ -500,7 +500,7 @@ impl Settings {
             }
             Message::Copy(index) => {
                 if let Some(entry) = self.entries.get(index) {
-                    match hippo_dictate::inject::copy(&entry.text) {
+                    match myware_voice::inject::copy(&entry.text) {
                         Ok(()) => self.copied = Some(index),
                         Err(error) => self.error = Some(format!("could not copy: {error}")),
                     }
@@ -570,7 +570,7 @@ impl Settings {
             RuleList::Punctuation => {
                 self.config
                     .punctuation
-                    .push(hippo_dictate::config::SpokenRule {
+                    .push(myware_voice::config::SpokenRule {
                         say: String::new(),
                         becomes: String::new(),
                     })
@@ -578,7 +578,7 @@ impl Settings {
             RuleList::Formatting => {
                 self.config
                     .formatting_rules
-                    .push(hippo_dictate::config::SpokenRule {
+                    .push(myware_voice::config::SpokenRule {
                         say: String::new(),
                         becomes: String::new(),
                     })
@@ -586,7 +586,7 @@ impl Settings {
             RuleList::Commands => {
                 self.config
                     .command_rules
-                    .push(hippo_dictate::config::CommandRule {
+                    .push(myware_voice::config::CommandRule {
                         say: String::new(),
                         action: "discard".to_string(),
                     })
@@ -594,7 +594,7 @@ impl Settings {
             RuleList::Shapes => self
                 .config
                 .shape_rules
-                .push(hippo_dictate::config::CommandRule {
+                .push(myware_voice::config::CommandRule {
                     say: String::new(),
                     action: "bullets".to_string(),
                 }),
@@ -670,7 +670,7 @@ impl Settings {
                 .width(Length::Fixed(HEADER_LOGO_SIZE))
                 .height(Length::Fixed(HEADER_LOGO_SIZE)),
             column![
-                text("Hippo Dictate").size(tokens::TEXT_XL).font(Font {
+                text("MyWare Voice").size(tokens::TEXT_XL).font(Font {
                     weight: font::Weight::Bold,
                     ..Font::DEFAULT
                 }),
@@ -957,7 +957,7 @@ impl Settings {
                         .style(pill_input)
                         .width(Length::FillPortion(3)),
                     button(icon_colored(
-                        hippo_ui::ICON_CLOSE,
+                        myware_ui::ICON_CLOSE,
                         tokens::TEXT_SM,
                         scheme.text
                     ))
@@ -982,7 +982,7 @@ impl Settings {
                         .style(pill_input)
                         .width(Length::FillPortion(3)),
                     button(icon_colored(
-                        hippo_ui::ICON_CLOSE,
+                        myware_ui::ICON_CLOSE,
                         tokens::TEXT_SM,
                         scheme.text
                     ))
@@ -1073,14 +1073,14 @@ impl Settings {
                                 .spacing(tokens::SPACE_2XS)
                                 .width(Length::Fill),
                                 button(icon_colored(
-                                    hippo_ui::ICON_CHECK,
+                                    myware_ui::ICON_CHECK,
                                     tokens::TEXT_SM,
                                     scheme.text
                                 ))
                                 .on_press(Message::AcceptSuggestion(index))
                                 .style(segment_button(scheme, false, false, false)),
                                 button(icon_colored(
-                                    hippo_ui::ICON_CLOSE,
+                                    myware_ui::ICON_CLOSE,
                                     tokens::TEXT_SM,
                                     scheme.text
                                 ))
@@ -1250,7 +1250,7 @@ impl Settings {
         }
 
         let needle = self.history_filter.trim().to_lowercase();
-        let visible: Vec<(usize, &hippo_dictate::history::Entry)> = self
+        let visible: Vec<(usize, &myware_voice::history::Entry)> = self
             .entries
             .iter()
             .enumerate()
@@ -1285,7 +1285,7 @@ impl Settings {
                 container(
                     row![
                         column![
-                            text(hippo_dictate::log::stamp(entry.epoch))
+                            text(myware_voice::log::stamp(entry.epoch))
                                 .size(tokens::TEXT_2XS)
                                 .color(scheme.muted),
                             text(entry.text.as_str()).size(tokens::TEXT_SM),
@@ -1357,7 +1357,7 @@ fn tab_key(key: Key, modifiers: Modifiers) -> Option<Message> {
 /// Read and delete the pane the tray asked for, if any.
 /// The pane this process was asked for, from the environment a launcher sets.
 fn requested_pane() -> Pane {
-    match hippo_dictate::compat::var("START_PANE").as_deref() {
+    match myware_voice::compat::var("START_PANE").as_deref() {
         Some("history") => Pane::History,
         Some("text") => Pane::Text,
         _ => Pane::Dictation,
@@ -1365,7 +1365,7 @@ fn requested_pane() -> Pane {
 }
 
 fn take_requested_pane() -> Option<Pane> {
-    let path = hippo_dictate::dirs::settings_request_file().ok()?;
+    let path = myware_voice::dirs::settings_request_file().ok()?;
     let text = std::fs::read_to_string(&path).ok()?;
     let _ = std::fs::remove_file(&path);
     match text.trim() {
@@ -1389,8 +1389,8 @@ fn focus_running_window() -> bool {
         FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
     };
 
-    let name: Vec<u16> = "Local\\hippo-dictate-settings\0".encode_utf16().collect();
-    let title: Vec<u16> = "Hippo Dictate\0".encode_utf16().collect();
+    let name: Vec<u16> = "Local\\myware-voice-settings\0".encode_utf16().collect();
+    let title: Vec<u16> = "MyWare Voice\0".encode_utf16().collect();
 
     unsafe {
         // CreateMutexW does not clear the last error on success, so a stale
@@ -1501,7 +1501,7 @@ fn rule_rows<'a>(
         }
         entry = entry.push(
             button(icon_colored(
-                hippo_ui::ICON_CLOSE,
+                myware_ui::ICON_CLOSE,
                 tokens::TEXT_SM,
                 scheme.text,
             ))
@@ -1612,11 +1612,11 @@ fn section<'a>(label: &'a str, scheme: Scheme) -> Element<'a, Message> {
         .into()
 }
 
-/// The original hippo, downscaled by `scripts/make-app-icons.py`.
+/// The original myware, downscaled by `scripts/make-app-icons.py`.
 fn header_logo() -> iced::widget::image::Handle {
     static LOGO: OnceLock<iced::widget::image::Handle> = OnceLock::new();
     LOGO.get_or_init(|| {
-        let image = image::load_from_memory(include_bytes!("../../icons/hippo.png"))
+        let image = image::load_from_memory(include_bytes!("../../icons/myware.png"))
             .expect("bundled header mark")
             .into_rgba8();
         let (width, height) = image.dimensions();
@@ -1642,7 +1642,7 @@ mod tests {
     #[test]
     fn saving_keeps_what_this_window_does_not_own() {
         let path = std::env::temp_dir().join(format!(
-            "hippo-dictate-settings-{}.toml",
+            "myware-voice-settings-{}.toml",
             std::process::id()
         ));
         // A comment above a key the window never writes, and a key from a version
@@ -1688,16 +1688,16 @@ mod tests {
     fn blank_rows_are_not_written_out() {
         let mut config = Config::default();
         config.snippets = vec![
-            hippo_dictate::config::Snippet {
+            myware_voice::config::Snippet {
                 trigger: "link".to_string(),
                 text: "https://example.invalid".to_string(),
             },
-            hippo_dictate::config::Snippet {
+            myware_voice::config::Snippet {
                 trigger: "  ".to_string(),
                 text: "abandoned".to_string(),
             },
         ];
-        config.replacements = vec![hippo_dictate::config::Replacement {
+        config.replacements = vec![myware_voice::config::Replacement {
             from: String::new(),
             to: "nothing".to_string(),
         }];
@@ -1711,7 +1711,7 @@ mod tests {
     #[test]
     fn a_file_that_does_not_parse_is_never_overwritten() {
         let path =
-            std::env::temp_dir().join(format!("hippo-dictate-broken-{}.toml", std::process::id()));
+            std::env::temp_dir().join(format!("myware-voice-broken-{}.toml", std::process::id()));
         // A typo the user can still fix by hand: saving over it would replace
         // their file with the defaults this window fell back to.
         std::fs::write(&path, "cleanup = true\npaste = \"nonsense\"\n").expect("write");

@@ -2,7 +2,7 @@
 #
 # `check` compiles every workspace member on the host: formatting, lints, and the
 # settings window, which no test builds and which would otherwise rot against its
-# `hippo-ui` dependency. It also type-checks the Windows target, which catches
+# `myware-ui` dependency. It also type-checks the Windows target, which catches
 # `cfg(windows)` code that the GNU cross-build links but a MSVC user would hit
 # first. `check` does not link, so the missing linker on a Linux runner does not
 # matter, and `build.rs` is a no-op off Windows by design.
@@ -41,11 +41,11 @@ check:
     - cargo fmt --all --check
     # `-D warnings` is the point: without it this job reports drift nobody acts on.
     - cargo clippy --workspace --all-targets -- -D warnings
-    # Host tests, including the settings window's. It depends on `hippo-ui` by
+    # Host tests, including the settings window's. It depends on `myware-ui` by
     # pinned rev rather than by branch, so this can only break when the rev is
     # bumped — which is when it should.
     - cargo test --workspace
-    - cargo check -p hippo-dictate --target x86_64-pc-windows-msvc
+    - cargo check -p myware-voice --target x86_64-pc-windows-msvc
 
 linux-release:
   stage: build
@@ -63,30 +63,30 @@ linux-release:
     - cargo build --release --workspace --locked
     - ./scripts/fetch-sherpa.sh
     - version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-    - stage="dist/hippo-dictate-$version-linux-x64"
+    - stage="dist/myware-voice-$version-linux-x64"
     - mkdir -p "$stage" "$stage/systemd"
-    - cp target/release/hippo-dictate target/release/hippo-dictate-daemon target/release/hippo-dictate-settings target/release/hippo-dictate-overlay "$stage/"
+    - cp target/release/myware-voice target/release/myware-voice-daemon target/release/myware-voice-settings target/release/myware-voice-overlay "$stage/"
     # sherpa-onnx and onnxruntime stay together: $ORIGIN rpath.
     - cp -R vendor/sherpa/lib "$stage/lib"
     - cp -R packaging/hicolor "$stage/hicolor"
-    - cp packaging/hippo-dictate.desktop packaging/PKGBUILD "$stage/"
-    - cp packaging/systemd/hippo-dictate.service "$stage/systemd/"
+    - cp packaging/myware-voice.desktop packaging/PKGBUILD "$stage/"
+    - cp packaging/systemd/myware-voice.service "$stage/systemd/"
     # install.sh looks for the binaries beside itself, which is how the extracted
     # folder is laid out; uninstall.sh and the docs come along for the ride.
     - cp scripts/install.sh scripts/uninstall.sh README.md LICENSE CONTRIBUTING.md models.lock models-streaming.lock sherpa.lock "$stage/"
-    - tar -czf "dist/hippo-dictate-$version-linux-x64.tar.gz" -C dist "hippo-dictate-$version-linux-x64"
-    - tar -tzf "dist/hippo-dictate-$version-linux-x64.tar.gz"
+    - tar -czf "dist/myware-voice-$version-linux-x64.tar.gz" -C dist "myware-voice-$version-linux-x64"
+    - tar -tzf "dist/myware-voice-$version-linux-x64.tar.gz"
     # Extract it and install it, because a tarball that only lists its contents has
     # proved nothing. This would have caught a fourth binary the installer did not
     # know about, or a launcher whose Exec= was not absolute.
     - |
-      tar -xzf "dist/hippo-dictate-$version-linux-x64.tar.gz" -C /tmp
+      tar -xzf "dist/myware-voice-$version-linux-x64.tar.gz" -C /tmp
       prefix=$(mktemp -d)
-      /tmp/hippo-dictate-$version-linux-x64/install.sh --prefix "$prefix"
-      test -x "$prefix/bin/hippo-dictate"
-      test -x "$prefix/libexec/hippo-dictate/hippo-dictate-overlay"
-      grep -q "^Exec=$prefix/libexec/hippo-dictate/hippo-dictate-settings$" \
-        "$prefix/share/applications/hippo-dictate.desktop"
+      /tmp/myware-voice-$version-linux-x64/install.sh --prefix "$prefix"
+      test -x "$prefix/bin/myware-voice"
+      test -x "$prefix/libexec/myware-voice/myware-voice-overlay"
+      grep -q "^Exec=$prefix/libexec/myware-voice/myware-voice-settings$" \
+        "$prefix/share/applications/myware-voice.desktop"
       # Sandboxed directories, so the runner's home is untouched and `doctor` reports
       # the runtime it installed rather than one on the image. The output is
       # asserted rather than the exit code: a missing model is a normal state on a
@@ -95,12 +95,12 @@ linux-release:
         XDG_STATE_HOME=$(mktemp -d) \
         XDG_DATA_HOME=$(mktemp -d) \
         XDG_CONFIG_HOME=$(mktemp -d) \
-        "$prefix/bin/hippo-dictate" doctor 2>&1 || true)
+        "$prefix/bin/myware-voice" doctor 2>&1 || true)
       echo "$out"
       echo "$out" | grep -q "sherpa-onnx"
-      echo "$out" | grep -q "$prefix/libexec/hippo-dictate/lib"
+      echo "$out" | grep -q "$prefix/libexec/myware-voice/lib"
   artifacts:
-    name: hippo-dictate-linux-$CI_COMMIT_SHORT_SHA
+    name: myware-voice-linux-$CI_COMMIT_SHORT_SHA
     paths:
       - dist/*.tar.gz
     expire_in: 30 days
@@ -126,31 +126,31 @@ windows-cross:
     - apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64 curl ca-certificates pkg-config libasound2-dev
     - rustup target add x86_64-pc-windows-gnu
     # Tests run on the host: a Windows binary cannot execute on this runner.
-    - cargo test -p hippo-dictate
+    - cargo test -p myware-voice
     # Only the daemon crate: the settings window pulls iced and wgpu, which are
     # built by scripts/build-windows.ps1 on a real Windows machine instead.
-    - cargo build --release -p hippo-dictate --target x86_64-pc-windows-gnu
+    - cargo build --release -p myware-voice --target x86_64-pc-windows-gnu
     - curl -fSL --retry 3 -o "/tmp/$SHERPA.tar.bz2" "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/$SHERPA.tar.bz2"
     - tar -xjf "/tmp/$SHERPA.tar.bz2" -C /tmp
     - mkdir -p dist
-    - cp target/x86_64-pc-windows-gnu/release/hippo-dictate.exe dist/
-    - cp target/x86_64-pc-windows-gnu/release/hippo-dictate-daemon.exe dist/
+    - cp target/x86_64-pc-windows-gnu/release/myware-voice.exe dist/
+    - cp target/x86_64-pc-windows-gnu/release/myware-voice-daemon.exe dist/
     # Only the C API and its ONNX Runtime dependencies. The cxx API is a separate
     # library the app never loads.
     - cp "/tmp/$SHERPA/lib/sherpa-onnx-c-api.dll" "/tmp/$SHERPA/lib/onnxruntime.dll" "/tmp/$SHERPA/lib/onnxruntime_providers_shared.dll" dist/
     - cp README.md LICENSE models.lock dist/
     - cp scripts/install.ps1 scripts/uninstall.ps1 dist/
     # Print the import table, then fail if the mingw runtime leaked in.
-    - x86_64-w64-mingw32-objdump -p dist/hippo-dictate.exe | grep 'DLL Name'
+    - x86_64-w64-mingw32-objdump -p dist/myware-voice.exe | grep 'DLL Name'
     - |
-      if x86_64-w64-mingw32-objdump -p dist/hippo-dictate.exe |
+      if x86_64-w64-mingw32-objdump -p dist/myware-voice.exe |
          grep -qiE 'DLL Name: (libgcc_s_seh-1|libwinpthread-1)\.dll'; then
         echo "unexpected mingw runtime dependency; +crt-static did not take" >&2
         exit 1
       fi
     - ls -l dist
   artifacts:
-    name: hippo-dictate-windows-$CI_COMMIT_SHORT_SHA
+    name: myware-voice-windows-$CI_COMMIT_SHORT_SHA
     paths:
       - dist/
     expire_in: 30 days
@@ -173,7 +173,7 @@ windows-msix:
     - powershell -ExecutionPolicy Bypass -File .\scripts\package-msix.ps1
     - Get-ChildItem dist\*.msix, dist\*.msix.sha256 | Select-Object Name, Length
   artifacts:
-    name: hippo-dictate-msix-$CI_COMMIT_SHORT_SHA
+    name: myware-voice-msix-$CI_COMMIT_SHORT_SHA
     paths:
       - dist/*.msix
       - dist/*.msix.sha256

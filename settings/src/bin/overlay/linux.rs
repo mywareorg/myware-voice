@@ -62,7 +62,7 @@ pub fn run() -> anyhow::Result<()> {
         &handle,
         surface,
         Layer::Overlay,
-        Some("hippo-dictate-overlay"),
+        Some("myware-voice-overlay"),
         None,
     );
     // Top right of the focused output, which is where the eye already is and

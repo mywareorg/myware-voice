@@ -20,13 +20,13 @@
   .\scripts\make-test-cert.ps1
 
 .EXAMPLE
-  .\scripts\make-test-cert.ps1 -PfxPath D:\keys\hippo.pfx -Password correct-horse -Force
+  .\scripts\make-test-cert.ps1 -PfxPath D:\keys\myware.pfx -Password correct-horse -Force
 #>
 [CmdletBinding()]
 param(
     [string]$Subject,
-    [string]$PfxPath = "dist\hippo-dictate-test.pfx",
-    [string]$Password = "hippo-dictate-test",
+    [string]$PfxPath = "dist\myware-voice-test.pfx",
+    [string]$Password = "myware-voice-test",
     [switch]$NoTrust,
     [switch]$Force
 )
@@ -61,7 +61,7 @@ if ($existing -and -not $Force) {
         -Type CodeSigningCert `
         -Subject $Subject `
         -KeyUsage DigitalSignature `
-        -FriendlyName "Hippo Dictate self-signed" `
+        -FriendlyName "MyWare Voice self-signed" `
         -NotAfter (Get-Date).AddYears(3) `
         -CertStoreLocation "Cert:\CurrentUser\My"
 }

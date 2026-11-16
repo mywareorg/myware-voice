@@ -1,4 +1,4 @@
-# The native runtime hippo-dictate loads at run time. Pinned exactly: the C struct
+# The native runtime myware-voice loads at run time. Pinned exactly: the C struct
 # layouts below this version do not match, and Parakeet TDT v3 needs >= 1.12.15.
 # Never bump without re-checking `size_of` in src/sherpa/mod.rs.
 version = "1.13.8"

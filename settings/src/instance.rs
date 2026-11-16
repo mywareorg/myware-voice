@@ -19,7 +19,7 @@ pub fn claim(pane: &str) -> bool {
     use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
     use std::time::Duration;
 
-    let Ok(address) = SocketAddr::from_abstract_name(b"hippo-dictate-settings") else {
+    let Ok(address) = SocketAddr::from_abstract_name(b"myware-voice-settings") else {
         return true;
     };
 
@@ -41,7 +41,7 @@ pub fn claim(pane: &str) -> bool {
                         if requested.is_empty() {
                             continue;
                         }
-                        if let Ok(path) = hippo_dictate::dirs::settings_request_file() {
+                        if let Ok(path) = myware_voice::dirs::settings_request_file() {
                             if let Some(dir) = path.parent() {
                                 let _ = std::fs::create_dir_all(dir);
                             }
@@ -95,7 +95,7 @@ pub fn claim(_pane: &str) -> bool {
 #[cfg(target_os = "linux")]
 fn focus_existing() {
     let _ = std::process::Command::new("swaymsg")
-        .arg("[app_id=hippo-dictate-settings] focus")
+        .arg("[app_id=myware-voice-settings] focus")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();

@@ -366,13 +366,13 @@ mod tests {
     fn a_reply_with_prose_around_it_still_parses() {
         let raw = r#"Sure. Here are the rules:
 ```json
-{"proposals":[{"kind":"replacement","say":"hipo","becomes":"Hippo","reason":"name is misheard"}]}
+{"proposals":[{"kind":"replacement","say":"mywar","becomes":"MyWare","reason":"name is misheard"}]}
 ```"#;
         let proposals = parse(raw).expect("parsed");
         assert_eq!(proposals.len(), 1);
         assert_eq!(proposals[0].kind, Kind::Replacement);
-        assert_eq!(proposals[0].say, "hipo");
-        assert_eq!(proposals[0].becomes, "Hippo");
+        assert_eq!(proposals[0].say, "mywar");
+        assert_eq!(proposals[0].becomes, "MyWare");
     }
 
     #[test]

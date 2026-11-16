@@ -1,24 +1,24 @@
 [package]
-name = "hippo-dictate-settings"
+name = "myware-voice-settings"
 version = "0.2.0"
 edition = "2021"
-description = "Settings window for hippo-dictate."
+description = "Settings window for myware-voice."
 license = "LGPL-2.1-only"
-repository = "https://gitlab.com/librewarelive/hippo-dictate"
+repository = "https://gitlab.com/mywareorg/myware-voice"
 
 [[bin]]
-name = "hippo-dictate-settings"
+name = "myware-voice-settings"
 path = "src/main.rs"
 
 [dependencies]
 # The config file is the contract between this window and the daemon; it is the
 # only reason this binary depends on the daemon crate, and it never talks to the
 # running daemon over its socket.
-hippo-dictate = { path = ".." }
+myware-voice = { path = ".." }
 # The sibling checkout, not a pinned git rev: the settings window is a separate
 # binary that no test builds, so a moving branch would break it silently. Keep
 # this pointed at the local `myware-ui` tree and build it when the UI crate moves.
-hippo-ui = { path = "../../myware-ui/crates/hippo-ui", features = ["serde"] }
+myware-ui = { path = "../../myware-ui/crates/myware-ui", features = ["serde"] }
 iced = { version = "0.13", features = ["tokio", "advanced", "image-without-codecs"] }
 # The window icon and the header mark arrive as PNG; decode them once rather
 # than enabling every codec iced would pull for `image`.
@@ -30,7 +30,7 @@ toml = "0.8"
 toml_edit = "0.22"
 
 [[bin]]
-name = "hippo-dictate-overlay"
+name = "myware-voice-overlay"
 path = "src/bin/overlay/main.rs"
 
 [target.'cfg(target_os = "linux")'.dependencies]

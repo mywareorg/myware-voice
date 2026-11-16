@@ -159,7 +159,7 @@ fn default_commands() -> Vec<CommandRule> {
             "scratch that, cancel that, discard that, never mind, nevermind",
             "discard",
         ),
-        ("quit hippo, hippo quit, hippo stop", "quit"),
+        ("quit myware, myware quit, myware stop", "quit"),
     ];
     TABLE
         .iter()
@@ -274,7 +274,7 @@ pub struct Config {
     /// Treat spoken punctuation names as punctuation. Off by default: people say
     /// "comma" and "period" in prose often enough that this has to be asked for.
     pub punctuation_commands: bool,
-    /// Whole-utterance commands: "scratch that", "quit hippo".
+    /// Whole-utterance commands: "scratch that", "quit myware".
     pub commands: bool,
     /// Words removed when cleanup is on.
     #[serde(default = "default_fillers")]
@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn a_stamp_notices_a_rewrite_and_a_deletion() {
-        let path = std::env::temp_dir().join(format!("hippo-dictate-stamp-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("myware-voice-stamp-{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
         assert_eq!(Stamp::of(&path), None, "a missing file has no stamp");
 

@@ -12,24 +12,22 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 /// The variable prefix, without the trailing underscore.
-pub const PREFIX: &str = "HIPPO_DICTATE";
+pub const PREFIX: &str = "MYWARE_VOICE";
 
 /// The prefix the previous generation used.
 ///
-/// Equal to `PREFIX` before a rename lands, so today every lookup reads the
-/// same key twice; after the rename this line alone keeps the old variables
-/// working.
+/// This line alone keeps installations that set the old variables working.
 pub const LEGACY_PREFIX: &str = "HIPPO_DICTATE";
 
 /// The app's directory name under each base directory.
-pub const APP: &str = "hippo-dictate";
+pub const APP: &str = "myware-voice";
 
 /// Directory names this app has lived under, newest first.
 ///
 /// The first one that exists on disk is renamed into place the first time a
 /// directory is resolved. Renaming is instant on one volume; if it fails, the
 /// legacy tree keeps being used rather than losing what is in it.
-pub const LEGACY_APPS: &[&str] = &[];
+pub const LEGACY_APPS: &[&str] = &["hippo-dictate"];
 
 /// The full name of a variable, for callers that hand it to `Command::env`.
 pub fn env_name(suffix: &str) -> String {
@@ -76,7 +74,7 @@ mod tests {
 
     fn scratch(tag: &str) -> PathBuf {
         let base = std::env::temp_dir().join(format!(
-            "hippo-dictate-{tag}-{}",
+            "myware-voice-{tag}-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&base);

@@ -12,27 +12,27 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-cargo build --quiet --bin hippo-dictate-daemon
+cargo build --quiet --bin myware-voice-daemon
 
 # `quit` is the socket command, so it also waits for a graceful stop; when no
 # daemon is running it exits non-zero, which is the state we wanted anyway.
-./target/debug/hippo-dictate quit >/dev/null 2>&1 || true
+./target/debug/myware-voice quit >/dev/null 2>&1 || true
 
 for _ in $(seq 1 25); do
-    if ! pgrep -f 'target/debug/hippo-dictate-daemon' >/dev/null; then
+    if ! pgrep -f 'target/debug/myware-voice-daemon' >/dev/null; then
         break
     fi
     sleep 0.2
 done
 
-if pgrep -f 'target/debug/hippo-dictate-daemon' >/dev/null; then
+if pgrep -f 'target/debug/myware-voice-daemon' >/dev/null; then
     echo "reload-daemon: the old daemon did not exit" >&2
     exit 1
 fi
 
-setsid nohup ./target/debug/hippo-dictate-daemon >/dev/null 2>&1 </dev/null &
+setsid nohup ./target/debug/myware-voice-daemon >/dev/null 2>&1 </dev/null &
 sleep 1
 
 # The point of the script is that the thing that is listening is the thing that
 # was just built, so say so rather than leaving it ambiguous.
-exec ./target/debug/hippo-dictate status
+exec ./target/debug/myware-voice status

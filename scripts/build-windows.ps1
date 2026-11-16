@@ -1,10 +1,10 @@
 #!/usr/bin/env pwsh
-# Build hippo-dictate on Windows and stage a release folder.
+# Build myware-voice on Windows and stage a release folder.
 #
 # One command: finds the MSVC toolchain (entering the Visual Studio developer
 # environment when link.exe is not already on PATH), fetches the native runtime if
 # it is missing, runs the tests, builds both executables, and stages exactly the
-# files a user needs into dist\hippo-dictate-<version>-win-x64, zipped.
+# files a user needs into dist\myware-voice-<version>-win-x64, zipped.
 #
 # The speech model is NOT bundled by default - it is 640 MB and downloaded once by
 # the user. Pass -WithModel to fetch it into the checkout for offline testing.
@@ -195,12 +195,12 @@ try {
 
     # --- stage -------------------------------------------------------------
     $version = (Select-String -Path (Join-Path $root 'Cargo.toml') -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
-    $stage = Join-Path $root "dist\hippo-dictate-$version-win-x64"
+    $stage = Join-Path $root "dist\myware-voice-$version-win-x64"
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
     $bin = Join-Path $root "target\$outDir"
-    foreach ($name in @('hippo-dictate.exe', 'hippo-dictate-daemon.exe', 'hippo-dictate-settings.exe')) {
+    foreach ($name in @('myware-voice.exe', 'myware-voice-daemon.exe', 'myware-voice-settings.exe')) {
         $from = Join-Path $bin $name
         if (-not (Test-Path -LiteralPath $from)) { throw "expected $from after the build" }
         Copy-Item -LiteralPath $from -Destination $stage
@@ -230,9 +230,9 @@ try {
     Write-Host "staged: $stage"
     Write-Host ''
     Write-Host 'Smoke test before shipping:'
-    Write-Host "  $stage\hippo-dictate.exe doctor"
+    Write-Host "  $stage\myware-voice.exe doctor"
     if (-not $WithModel) {
-        Write-Host '  (the model is not bundled: run `hippo-dictate model download` on the target machine)'
+        Write-Host '  (the model is not bundled: run `myware-voice model download` on the target machine)'
     }
 } finally {
     Pop-Location

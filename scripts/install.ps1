@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# Install hippo-dictate for the current user.
+# Install myware-voice for the current user.
 #
 # No administrator rights: everything lives under %LOCALAPPDATA%, the start-up
 # entry is HKCU, and the PATH change is the user PATH.
@@ -19,9 +19,9 @@ $ErrorActionPreference = 'Stop'
 
 if (-not $env:LOCALAPPDATA) { throw 'LOCALAPPDATA is not set; this is not a normal Windows session' }
 
-$target = Join-Path $env:LOCALAPPDATA 'Programs\hippo-dictate'
+$target = Join-Path $env:LOCALAPPDATA 'Programs\myware-voice'
 
-foreach ($required in @('hippo-dictate.exe', 'hippo-dictate-daemon.exe', 'sherpa-onnx-c-api.dll', 'onnxruntime.dll')) {
+foreach ($required in @('myware-voice.exe', 'myware-voice-daemon.exe', 'sherpa-onnx-c-api.dll', 'onnxruntime.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $Source $required))) {
         throw "missing $required; run install.ps1 from the extracted release folder"
     }
@@ -59,15 +59,15 @@ if (-not $NoStartup) {
     $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     New-Item -Path $run -Force | Out-Null
     # The daemon binary is GUI-subsystem, so this opens no console at login.
-    Set-ItemProperty -Path $run -Name 'HippoVoice' `
-        -Value "`"$(Join-Path $target 'hippo-dictate-daemon.exe')`""
+    Set-ItemProperty -Path $run -Name 'MyWareVoice' `
+        -Value "`"$(Join-Path $target 'myware-voice-daemon.exe')`""
     Write-Host 'start-on-login registered (HKCU Run)'
 }
 
-$client = Join-Path $target 'hippo-dictate.exe'
+$client = Join-Path $target 'myware-voice.exe'
 & $client status *> $null
 if ($LASTEXITCODE -ne 0) {
-    Start-Process -FilePath (Join-Path $target 'hippo-dictate-daemon.exe')
+    Start-Process -FilePath (Join-Path $target 'myware-voice-daemon.exe')
     Start-Sleep -Milliseconds 800
 }
 

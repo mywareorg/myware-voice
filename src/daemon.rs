@@ -1,6 +1,6 @@
 //! The resident process: one microphone, one warm recognizer, one socket.
 //!
-//! `hippo-dictate toggle` — what the compositor keybind runs — is a client of this
+//! `myware-voice toggle` — what the compositor keybind runs — is a client of this
 //! process. The daemon never takes focus, which is the only reason a paste can
 //! land in the window the user was already typing in.
 //!
@@ -39,7 +39,7 @@ fn since(at: Instant) -> f32 {
 
 /// Identifies the daemon on the wire, so a recycled port or a socket some other
 /// service has taken over cannot be mistaken for one.
-const APP: &str = "hippo-dictate";
+const APP: &str = "myware-voice";
 /// The wire version, sent both ways and checked on both sides.
 ///
 /// Bump this when a field changes meaning, not when one is added: an extra field
@@ -52,7 +52,7 @@ const PROTOCOL: u32 = 1;
 /// disk. Read once at startup; a spawned daemon inherits it.
 /// Skip the clipboard and the paste, so a test does not need `wl-copy` or a
 /// focused window. Delivery itself has its own tests.
-/// `HIPPO_DICTATE_FAKE_DELIVERY=0` is how a test asks for the real delivery path
+/// `MYWARE_VOICE_FAKE_DELIVERY=0` is how a test asks for the real delivery path
 /// while still using a fake microphone and model: the shims that stand in for
 /// `wl-copy` are cheaper than a real selection owner.
 fn fake_delivery_from(value: Option<&str>) -> bool {
@@ -118,7 +118,7 @@ pub struct Status {
     #[serde(default)]
     pub streaming: bool,
     /// How a transcript is delivered, as configured. Mirrors `config.toml` so
-    /// `hippo-dictate status` can answer "which paste tool is it actually using".
+    /// `myware-voice status` can answer "which paste tool is it actually using".
     #[serde(default)]
     pub paste: String,
     /// Bumped every time an edited `config.toml` is applied, so a client can tell
@@ -258,7 +258,7 @@ pub struct Reply {
     pub tier: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub licence: Option<String>,
-    /// Cost of the last delivery, for `hippo-dictate status`.
+    /// Cost of the last delivery, for `myware-voice status`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timings: Option<Timings>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -292,7 +292,7 @@ pub fn request(command: &str) -> Result<Reply> {
         if version != PROTOCOL {
             anyhow::bail!(
                 "the running daemon speaks protocol {version}, this client speaks {PROTOCOL}; \
-                 upgrade or restart it with `hippo-dictate quit`"
+                 upgrade or restart it with `myware-voice quit`"
             );
         }
     }
@@ -350,7 +350,7 @@ struct Daemon {
     tier: Tier,
     /// When the stop press arrived, for the delivery spans.
     stopped_at: Option<Instant>,
-    /// Set by a spoken "quit hippo" or the equivalent.
+    /// Set by a spoken "quit myware" or the equivalent.
     quit_requested: bool,
     /// The Linux listening popup, while a capture is running.
     #[cfg(target_os = "linux")]
@@ -452,7 +452,7 @@ impl Daemon {
         }
         // A test run must not pop a notification on the machine running it.
         if !self.fake_delivery {
-            inject::notify("Hippo Dictate did not transcribe", reason);
+            inject::notify("MyWare Voice did not transcribe", reason);
         }
     }
 
@@ -1503,8 +1503,8 @@ fn silent_tail(samples: &[f32], rate: u32) -> bool {
     energy.sqrt() < 0.008
 }
 
-/// Find the model location, then run. This is what both `hippo-dictate daemon` and
-/// the `hippo-dictate-daemon` binary call; the configuration is read inside `run`,
+/// Find the model location, then run. This is what both `myware-voice daemon` and
+/// the `myware-voice-daemon` binary call; the configuration is read inside `run`,
 /// which also re-reads it when the file changes.
 pub fn run_process() -> Result<()> {
     // Before anything that can panic: a crash has to leave a line behind.
@@ -1590,7 +1590,7 @@ pub fn run(model_dir: PathBuf) -> Result<()> {
         // The one failure worth interrupting for: without a model nothing works,
         // and the fix is a command the user has to be told.
         if !fake_delivery() {
-            inject::notify("Hippo Dictate has no model", problem);
+            inject::notify("MyWare Voice has no model", problem);
         }
     }
 
@@ -1752,7 +1752,7 @@ fn serve(
                 &mut *stream,
                 format!(
                     "this daemon speaks protocol {PROTOCOL}, the client speaks {version}; \
-                     upgrade or restart it with `hippo-dictate quit`"
+                     upgrade or restart it with `myware-voice quit`"
                 ),
             );
         }
@@ -1876,7 +1876,7 @@ fn serve(
     Ok(())
 }
 
-/// How long `HIPPO_DICTATE_FAKE_DECODE=slow` spends per job. Long enough that a
+/// How long `MYWARE_VOICE_FAKE_DECODE=slow` spends per job. Long enough that a
 /// second press lands while the decoder is still working, which is the case the
 /// phase machine has to survive.
 const SLOW_DECODE: Duration = Duration::from_millis(400);
@@ -1893,7 +1893,7 @@ struct Decoder<'a> {
     generation: &'a AtomicU64,
     /// A canned transcript, when the tests asked for one.
     fake: Option<&'a str>,
-    /// `HIPPO_DICTATE_FAKE_DECODE`: `panic` fails the first decode, `slow` delays
+    /// `MYWARE_VOICE_FAKE_DECODE`: `panic` fails the first decode, `slow` delays
     /// every one.
     fake_decode: Option<&'a str>,
     /// Set before the fake panic fires, so only the first decode fails and the

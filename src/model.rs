@@ -157,7 +157,7 @@ pub fn unusable_reason(dir: &Path) -> Option<String> {
         None
     } else {
         Some(format!(
-            "no usable model in {} (missing {}); run `hippo-dictate model download`",
+            "no usable model in {} (missing {}); run `myware-voice model download`",
             dir.display(),
             missing.join(", ")
         ))
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn a_missing_file_is_reported_missing_rather_than_corrupt() {
-        let dir = std::env::temp_dir().join("hippo-dictate-model-test");
+        let dir = std::env::temp_dir().join("myware-voice-model-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let rows = inspect(&dir, false).unwrap();

@@ -19,7 +19,7 @@ use crate::config::Config;
 pub enum Command {
     /// Throw it away: "scratch that".
     Discard,
-    /// Stop the daemon: "quit hippo".
+    /// Stop the daemon: "quit myware".
     Quit,
 }
 
@@ -499,12 +499,12 @@ mod tests {
     fn replacements_are_whole_words_and_case_insensitive() {
         let mut config = config();
         config.replacements = vec![crate::config::Replacement {
-            from: "hippo".to_string(),
-            to: "Hippo Dictate".to_string(),
+            from: "myware".to_string(),
+            to: "MyWare Voice".to_string(),
         }];
-        assert_eq!(text("open hippo now", &config), "open Hippo Dictate now");
+        assert_eq!(text("open myware now", &config), "open MyWare Voice now");
         // Not a substring match.
-        assert_eq!(text("hippopotamus", &config), "hippopotamus");
+        assert_eq!(text("mywarehouse", &config), "mywarehouse");
     }
 
     #[test]
@@ -541,7 +541,7 @@ mod tests {
             Outcome::Command(Command::Discard)
         );
         assert_eq!(
-            apply("quit hippo", &config()),
+            apply("quit myware", &config()),
             Outcome::Command(Command::Quit)
         );
         assert!(matches!(
@@ -651,10 +651,10 @@ mod tests {
         assert_eq!(text("my calendar", &config), "https://cal.example");
 
         config.replacements = vec![Replacement {
-            from: "hippo, hipo".to_string(),
-            to: "Hippo".to_string(),
+            from: "myware, mywar".to_string(),
+            to: "MyWare".to_string(),
         }];
-        assert_eq!(text("call hipo now", &config), "call Hippo now");
+        assert_eq!(text("call mywar now", &config), "call MyWare now");
     }
 
     #[test]

@@ -95,7 +95,7 @@ pub fn write(message: &str) {
 /// no longer exists and correctly falls back to the normal log only.
 pub fn error_file() -> Option<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    root.is_dir().then(|| root.join("hippo-dictate-error.log"))
+    root.is_dir().then(|| root.join("myware-voice-error.log"))
 }
 
 /// Append an error to the log, and to the checkout-root error file.
@@ -125,7 +125,7 @@ pub fn error(message: &str) {
             .unwrap_or_else(|_| "unknown executable".to_string());
         let _ = writeln!(
             file,
-            "hippo-dictate {} · {} {} · {}",
+            "myware-voice {} · {} {} · {}",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH,
@@ -157,8 +157,8 @@ fn rotate(path: &Path) {
     let _ = std::fs::rename(path, rotated(path));
 }
 
-/// `log` becomes `log.1`; `hippo-dictate-error.log` becomes
-/// `hippo-dictate-error.log.1`, which is what someone looking for it would guess.
+/// `log` becomes `log.1`; `myware-voice-error.log` becomes
+/// `myware-voice-error.log.1`, which is what someone looking for it would guess.
 fn rotated(path: &Path) -> PathBuf {
     let mut name = path
         .file_name()
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn a_full_log_is_rotated_not_emptied() {
         let root =
-            std::env::temp_dir().join(format!("hippo-dictate-rotate-{}", std::process::id()));
+            std::env::temp_dir().join(format!("myware-voice-rotate-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("log");

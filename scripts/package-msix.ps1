@@ -1,13 +1,13 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  One command: build, self-sign and pack hippo-dictate as an MSIX.
+  One command: build, self-sign and pack myware-voice as an MSIX.
 
 .DESCRIPTION
   The whole pipeline, in the order the pieces depend on each other:
 
     1. build-windows.ps1 stages the executables, the sherpa runtime and the VC
-       runtime into dist\hippo-dictate-<version>-win-x64
+       runtime into dist\myware-voice-<version>-win-x64
     2. make-test-cert.ps1 creates (or reuses) a self-signed code-signing
        certificate whose subject matches packaging\identity.json
     3. make-msix.ps1 lays out the package, indexes the assets, packs it, verifies
@@ -38,8 +38,8 @@ param(
     [switch]$Install,
     [switch]$SkipBuild,
     [switch]$NoCertificate,
-    [string]$Password = "hippo-dictate-test",
-    [string]$PfxPath = "dist\hippo-dictate-test.pfx"
+    [string]$Password = "myware-voice-test",
+    [string]$PfxPath = "dist\myware-voice-test.pfx"
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,8 +56,8 @@ if ($manifest -notmatch '(?m)^version = "([^"]+)"') {
     throw "Could not read the version from Cargo.toml"
 }
 $version = $Matches[1]
-$stage = Join-Path $OutDir "hippo-dictate-$version-win-x64"
-$name = "hippo-dictate-$version-win-x64"
+$stage = Join-Path $OutDir "myware-voice-$version-win-x64"
+$name = "myware-voice-$version-win-x64"
 
 if (-not $SkipBuild) {
     Write-Step "building the Windows stage"
@@ -88,7 +88,7 @@ if ($Install) {
     Write-Step "installing $msix"
     Add-AppxPackage -Path $msix
     Write-Host "Installed. Start it from the Start menu, then run:" -ForegroundColor Green
-    Write-Host "  hippo-dictate model download"
+    Write-Host "  myware-voice model download"
 }
 
 Write-Host ""

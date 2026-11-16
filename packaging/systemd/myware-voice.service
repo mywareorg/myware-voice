@@ -8,14 +8,14 @@
 # Import the environment from the compositor first, in the sway config:
 #
 #   exec systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP SWAYSOCK
-#   exec systemctl --user start hippo-dictate
+#   exec systemctl --user start myware-voice
 #
-# Starting the daemon from the sway config alone — `exec hippo-dictate daemon` — is
+# Starting the daemon from the sway config alone — `exec myware-voice daemon` — is
 # simpler and needs none of this. Use the unit when you want restarts and journal
 # history, and keep the import-environment line next to it.
 [Unit]
-Description=Hippo Dictate push-to-talk daemon
-Documentation=https://gitlab.com/librewarelive/hippo-dictate
+Description=MyWare Voice push-to-talk daemon
+Documentation=https://gitlab.com/mywareorg/myware-voice
 After=graphical-session.target
 PartOf=graphical-session.target
 
@@ -23,7 +23,7 @@ PartOf=graphical-session.target
 Type=simple
 # The installed layout: real binaries and the sherpa runtime in libexec, symlinks
 # on PATH. install.sh rewrites this line for a non-default prefix.
-ExecStart=%h/.local/libexec/hippo-dictate/hippo-dictate daemon
+ExecStart=%h/.local/libexec/myware-voice/myware-voice daemon
 Restart=on-failure
 # A crash loop is more useful as a log than as a hundred restarts a minute.
 RestartSec=2

@@ -115,7 +115,7 @@ pub fn spawn(events: Sender<Event>) -> Result<()> {
 fn run(events: Sender<Event>) -> Result<()> {
     unsafe {
         let instance = GetModuleHandleW(std::ptr::null());
-        let class_name: Vec<u16> = "HippoVoiceTray\0".encode_utf16().collect();
+        let class_name: Vec<u16> = "MyWareVoiceTray\0".encode_utf16().collect();
 
         let class = WNDCLASSW {
             lpfnWndProc: Some(window_proc),
@@ -160,7 +160,7 @@ fn run(events: Sender<Event>) -> Result<()> {
         // Embedded by build.rs as resource 1, so the notification area shows the
         // same mark as Explorer and the taskbar.
         data.hIcon = load_icon(instance);
-        let tip: Vec<u16> = "Hippo Dictate - click to open settings, ctrl+space to dictate\0"
+        let tip: Vec<u16> = "MyWare Voice - click to open settings, ctrl+space to dictate\0"
             .encode_utf16()
             .collect();
         for (slot, value) in data.szTip.iter_mut().zip(tip.iter()) {
@@ -212,7 +212,7 @@ unsafe fn build_menu() -> *mut std::ffi::c_void {
         return menu;
     }
 
-    let header = wide("Hippo Dictate");
+    let header = wide("MyWare Voice");
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, header.as_ptr());
     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
     let settings = wide("Open settings\u{2026}");
@@ -328,12 +328,12 @@ fn open_settings(pane: &str) {
         return;
     };
     let Some(dir) = exe.parent() else { return };
-    let path = dir.join("hippo-dictate-settings.exe");
+    let path = dir.join("myware-voice-settings.exe");
     if !path.is_file() {
         crate::log::error(&format!("tray: {} is not installed", path.display()));
         notify(
             "Settings are not available",
-            "hippo-dictate-settings.exe is missing beside the daemon.",
+            "myware-voice-settings.exe is missing beside the daemon.",
         );
         return;
     }

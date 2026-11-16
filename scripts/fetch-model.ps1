@@ -9,7 +9,7 @@
 #
 # Usage:
 #   .\scripts\fetch-model.ps1
-#   .\scripts\fetch-model.ps1 -Dir "$env:LOCALAPPDATA\hippo-dictate\models\parakeet-v3-int8"
+#   .\scripts\fetch-model.ps1 -Dir "$env:LOCALAPPDATA\myware-voice\models\parakeet-v3-int8"
 [CmdletBinding()]
 param(
     [string]$Dir

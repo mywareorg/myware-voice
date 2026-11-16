@@ -4,25 +4,25 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
-use hippo_dictate::audio;
-use hippo_dictate::capture;
-use hippo_dictate::config::Config;
-use hippo_dictate::daemon;
-use hippo_dictate::history;
-use hippo_dictate::inject;
-use hippo_dictate::licence::{self, Tier};
-use hippo_dictate::log;
-use hippo_dictate::model;
-use hippo_dictate::ollama;
+use myware_voice::audio;
+use myware_voice::capture;
+use myware_voice::config::Config;
+use myware_voice::daemon;
+use myware_voice::history;
+use myware_voice::inject;
+use myware_voice::licence::{self, Tier};
+use myware_voice::log;
+use myware_voice::model;
+use myware_voice::ollama;
 #[cfg(target_os = "linux")]
-use hippo_dictate::popup;
-use hippo_dictate::sherpa::Sherpa;
-use hippo_dictate::suggest;
-use hippo_dictate::text::{self, Outcome};
+use myware_voice::popup;
+use myware_voice::sherpa::Sherpa;
+use myware_voice::suggest;
+use myware_voice::text::{self, Outcome};
 
 #[derive(Parser)]
 #[command(
-    name = "hippo-dictate",
+    name = "myware-voice",
     version,
     about = "Push-to-talk dictation. Speak; the transcript lands where you were typing."
 )]
@@ -243,7 +243,7 @@ fn main() -> Result<()> {
                 println!("stopped");
                 Ok(())
             }
-            Err(error) if hippo_dictate::transport::is_unreachable(&error) => {
+            Err(error) if myware_voice::transport::is_unreachable(&error) => {
                 println!("not running");
                 Ok(())
             }
@@ -257,7 +257,7 @@ fn main() -> Result<()> {
                 }
                 Ok(())
             }
-            Err(error) if hippo_dictate::transport::is_unreachable(&error) => {
+            Err(error) if myware_voice::transport::is_unreachable(&error) => {
                 println!("not running");
                 Ok(())
             }
@@ -271,7 +271,7 @@ fn main() -> Result<()> {
                 println!("ok");
                 Ok(())
             }
-            Err(error) if hippo_dictate::transport::is_unreachable(&error) => {
+            Err(error) if myware_voice::transport::is_unreachable(&error) => {
                 println!("not running");
                 Ok(())
             }
@@ -280,7 +280,7 @@ fn main() -> Result<()> {
         Command::Status => {
             let reply = match daemon::request("status") {
                 Ok(reply) => reply,
-                Err(error) if hippo_dictate::transport::is_unreachable(&error) => {
+                Err(error) if myware_voice::transport::is_unreachable(&error) => {
                     println!("not running");
                     return Ok(());
                 }
@@ -372,7 +372,7 @@ fn licence_command(command: LicenceCommand) -> Result<()> {
             println!("public  {public}");
             println!("private {private}");
             eprintln!(
-                "build with HIPPO_DICTATE_LICENCE_PUBKEY=<public>; keep <private> off the machines that run the app"
+                "build with MYWARE_VOICE_LICENCE_PUBKEY=<public>; keep <private> off the machines that run the app"
             );
             Ok(())
         }
@@ -434,7 +434,7 @@ fn model_dir() -> Result<PathBuf> {
 }
 
 fn doctor() -> Result<()> {
-    println!("hippo-dictate {}", env!("CARGO_PKG_VERSION"));
+    println!("myware-voice {}", env!("CARGO_PKG_VERSION"));
 
     match Sherpa::open() {
         Ok(sherpa) => {
@@ -461,7 +461,7 @@ fn doctor() -> Result<()> {
             } else {
                 println!("model         INCOMPLETE at {}", dir.display());
                 println!("  missing     {}", missing.join(", "));
-                println!("  fix         hippo-dictate model download");
+                println!("  fix         myware-voice model download");
             }
         }
         Err(error) => {
@@ -483,7 +483,7 @@ fn doctor() -> Result<()> {
                 } else {
                     println!("streaming     INCOMPLETE at {}", dir.display());
                     println!(
-                        "  fix         hippo-dictate model download --streaming (falls back to phrase chunks)"
+                        "  fix         myware-voice model download --streaming (falls back to phrase chunks)"
                     );
                 }
             }
@@ -771,9 +771,9 @@ fn model_command(command: ModelCommand) -> Result<()> {
         model::resolve_dir()?
     };
     let rerun = if streaming {
-        "hippo-dictate model download --streaming"
+        "myware-voice model download --streaming"
     } else {
-        "hippo-dictate model download"
+        "myware-voice model download"
     };
     match command {
         ModelCommand::Status { .. } => {
@@ -856,7 +856,7 @@ fn session_name() -> &'static str {
 
 fn transcribe(path: &Path, json: bool, threads: i32, repeat: usize) -> Result<()> {
     let dir = model_dir()
-        .context("no model directory; set HIPPO_DICTATE_MODEL_DIR or run scripts/fetch-model.sh")?;
+        .context("no model directory; set MYWARE_VOICE_MODEL_DIR or run scripts/fetch-model.sh")?;
 
     let started = Instant::now();
     let (samples, gain) = audio::prepare(path)?;

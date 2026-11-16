@@ -5,7 +5,7 @@
   formatting.
 
 .DESCRIPTION
-  Dot-source this. It is deliberately small: hippo-transcribe's helper carries
+  Dot-source this. It is deliberately small: myware-scribe's helper carries
   CMake, 7-Zip and GPU detection, none of which this app needs.
 #>
 
