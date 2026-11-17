@@ -20,6 +20,10 @@
   `config.toml` alone is picked up on the next idle tick, because the daemon
   reloads it when the stamp changes.
 
+- `cargo lint` runs clippy over every target, including the settings window and
+  the integration tests. Run it before committing; it passes clean today, and
+  `cargo lint-strict` is the same command with `-D warnings`.
+
 ## This app
 
 A background daemon, not a window. The compositor owns the keybind; the daemon

@@ -24,6 +24,17 @@
 #
 # Jobs run for merge requests, tags and the default branch. A push to `dev` costs
 # nothing; the merge request is the gate.
+# Pipelines are off until we decide otherwise. Nothing runs on push, merge
+# request, tag or schedule. To start one deliberately: CI/CD > Pipelines >
+# Run pipeline, and add CI_ENABLED=1 as a variable.
+#
+# The jobs below are kept, not deleted, so the work is not lost. Re-enabling is
+# the variable, not a rewrite.
+workflow:
+  rules:
+    - if: $CI_ENABLED == "1"
+    - when: never
+
 stages:
   - check
   - build

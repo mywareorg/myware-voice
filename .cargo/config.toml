@@ -1,0 +1,7 @@
+# Local linting, standing in for the pipeline that no longer runs.
+#
+# `--all-targets` is the point: it also compiles the test binaries and the
+# settings window, which no other command in this repository builds.
+[alias]
+lint = "clippy --workspace --all-targets"
+lint-strict = "clippy --workspace --all-targets -- -D warnings"
