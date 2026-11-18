@@ -1,8 +1,12 @@
 //! Short cues, because there is no window to look at.
 //!
 //! A dictation app that records silently gives the user no way to tell
-//! "recording" from "the daemon is hung". Two cues are enough: a rising note when
-//! capture starts and a falling one when a transcript has been delivered.
+//! "recording" from "the daemon is hung". Three cues: a rising note when capture
+//! starts, a short tick when the key that ended the capture is accepted, and a
+//! falling one when a transcript has been delivered. The tick is what makes the
+//! stop press audible immediately — the decode that follows takes a few hundred
+//! milliseconds, and without it the only feedback for the press that ends the
+//! dictation is silence.
 //!
 //! Playing is fire-and-forget on its own thread: opening an output device can
 //! take tens of milliseconds, and that must never sit between the keypress and
@@ -13,6 +17,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cue {
     Start,
+    Stop,
     Done,
 }
 
@@ -20,6 +25,7 @@ impl Cue {
     fn name(self) -> &'static str {
         match self {
             Cue::Start => "start",
+            Cue::Stop => "stop",
             Cue::Done => "done",
         }
     }
@@ -27,6 +33,7 @@ impl Cue {
     fn frequency(self) -> f32 {
         match self {
             Cue::Start => 880.0,
+            Cue::Stop => 659.26,
             Cue::Done => 587.33,
         }
     }
@@ -34,6 +41,9 @@ impl Cue {
     fn milliseconds(self) -> u32 {
         match self {
             Cue::Start => 70,
+            // Shorter than the others: it marks a press, not a state change, and
+            // it is followed by `Done` once the transcript lands.
+            Cue::Stop => 45,
             Cue::Done => 90,
         }
     }
@@ -154,8 +164,18 @@ mod tests {
     }
 
     #[test]
-    fn the_two_cues_are_different_notes() {
+    fn the_three_cues_are_different_notes() {
         assert_ne!(Cue::Start.frequency(), Cue::Done.frequency());
-        assert!(Cue::Start.frequency() > Cue::Done.frequency());
+        assert_ne!(Cue::Stop.frequency(), Cue::Done.frequency());
+        assert_ne!(Cue::Start.frequency(), Cue::Stop.frequency());
+        // Rising on the way in, falling on the way out.
+        assert!(Cue::Start.frequency() > Cue::Stop.frequency());
+        assert!(Cue::Stop.frequency() > Cue::Done.frequency());
+    }
+
+    #[test]
+    fn the_stop_cue_is_the_shortest() {
+        assert!(Cue::Stop.milliseconds() < Cue::Start.milliseconds());
+        assert!(Cue::Stop.milliseconds() < Cue::Done.milliseconds());
     }
 }

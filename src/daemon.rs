@@ -624,6 +624,11 @@ impl Daemon {
         // The clock for the delivery spans starts here, at the stop press, not
         // when the decoder gets round to it.
         self.stopped_at = Some(Instant::now());
+        // The stop press is otherwise silent until the transcript lands, and the
+        // decode in between is the longest wait in the cycle.
+        if self.config.tones {
+            tone::play(Cue::Stop);
+        }
         let Some(recorder) = self.recorder.take() else {
             self.set(Phase::Idle);
             return Ok(());
@@ -748,6 +753,11 @@ impl Daemon {
 
     /// Stop capturing and decode whatever has not been committed yet.
     fn stop_streaming(&mut self) -> Result<()> {
+        // Before the branch: both streaming paths end at the stop press, and the
+        // cue belongs to the press rather than to how the tail is decoded.
+        if self.config.tones {
+            tone::play(Cue::Stop);
+        }
         if self.online.is_some() {
             return self.stop_online();
         }

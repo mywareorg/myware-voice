@@ -234,7 +234,8 @@ pub struct Config {
     pub trailing_space: bool,
     /// Hard stop for one capture, in seconds.
     pub max_seconds: f32,
-    /// Play a tone when recording starts and when a transcript is delivered.
+    /// Play a tone when recording starts, when the stop press is accepted, and
+    /// when a transcript has been delivered.
     pub tones: bool,
     /// The chord the daemon registers on Windows. Linux uses the compositor's
     /// binding and ignores this.
