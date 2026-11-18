@@ -32,6 +32,15 @@ use crate::transport::{self, Listener, Stream};
 /// Longest pause between event-loop polls. Also the status freshness.
 const TICK: Duration = Duration::from_millis(100);
 
+/// How long the transcript stays on the clipboard after the paste chord.
+///
+/// The chord only queues the paste: the target application reads the selection
+/// afterwards, and a `wl-copy` that replaces it in between makes that read fail or
+/// hand over the wrong bytes. A delay long enough to cover the read is the price
+/// of not needing a clipboard-manager protocol; the tick rounds it up to the next
+/// poll, so the real wait is this plus up to one `TICK`.
+const PASTE_SETTLE: Duration = Duration::from_millis(150);
+
 /// Milliseconds since `at`, as the spans are reported.
 fn since(at: Instant) -> f32 {
     at.elapsed().as_secs_f32() * 1000.0
@@ -356,8 +365,11 @@ struct Daemon {
     #[cfg(target_os = "linux")]
     popup: Option<crate::popup::Popup>,
     /// What the clipboard held when this capture started, if the policy is to put
-    /// it back at the next one.
+    /// it back once the transcript has been pasted.
     pending_restore: Option<String>,
+    /// When to put it back. Set once the paste chord has been sent, so the target
+    /// application has time to read the selection before it is replaced.
+    restore_at: Option<Instant>,
     /// What we last wrote to the clipboard, so a restore can tell our text from
     /// something the user copied since.
     last_payload: Option<String>,
@@ -1029,6 +1041,10 @@ impl Daemon {
                 inject::notify("Streaming stopped", "No paste tool available");
                 return Err(anyhow!("no paste tool"));
             }
+            // The session's last chunk is the end of the paste run, so the
+            // selection that was there before it started comes back then. Earlier
+            // chunks are followed by another copy within milliseconds anyway.
+            Ok(_) if final_chunk => self.schedule_restore(),
             Ok(_) => {}
             Err(error) => return Err(error).context("stream paste"),
         }
@@ -1151,7 +1167,8 @@ impl Daemon {
             Ok(crate::config::PasteMethod::None) => {
                 inject::notify("Transcript copied", "No paste tool available");
             }
-            Ok(_) => {}
+            // The text is in the window; the copy of it is no longer needed.
+            Ok(_) => self.schedule_restore(),
             Err(error) => {
                 note_error(&format!("paste failed: {error:#}"));
                 inject::notify("Transcript copied", "Paste failed; paste it yourself");
@@ -1201,10 +1218,14 @@ impl Daemon {
 
     /// Put the previous clipboard back, if it is still ours to put back.
     ///
-    /// Called at the *start* of the next capture rather than after the paste: a
-    /// restore immediately after the chord races the target application's read of
-    /// the selection, and by the next press the user has usually moved on anyway.
+    /// Runs `PASTE_SETTLE` after a successful paste, not on the next press: the
+    /// transcript is a means of getting text into a window, so the selection the
+    /// user had is returned as soon as the paste that needed it is over. A capture
+    /// that never pasted — `paste = none`, a failed chord, a window that moved, or
+    /// no transcript at all — leaves the text where the user can collect it; the
+    /// next capture puts the old selection back instead.
     fn restore_clipboard(&mut self) {
+        self.restore_at = None;
         let Some(previous) = self.pending_restore.take() else {
             return;
         };
@@ -1216,6 +1237,24 @@ impl Daemon {
         match inject::set_clipboard(&previous) {
             Ok(()) => log::write("clipboard restored"),
             Err(error) => note(&format!("clipboard: could not restore: {error:#}")),
+        }
+    }
+
+    /// Arm the restore for after the target application has read the selection.
+    ///
+    /// Only a real paste justifies replacing the clipboard: the transcript has
+    /// reached the window, so the copy of it is dead weight. Called by both
+    /// delivery paths, once the chord has been sent.
+    fn schedule_restore(&mut self) {
+        if self.pending_restore.is_some() {
+            self.restore_at = Some(Instant::now() + PASTE_SETTLE);
+        }
+    }
+
+    /// The tick side of `schedule_restore`.
+    fn restore_due(&mut self) {
+        if self.restore_at.is_some_and(|at| Instant::now() >= at) {
+            self.restore_clipboard();
         }
     }
 
@@ -1655,6 +1694,7 @@ pub fn run(model_dir: PathBuf) -> Result<()> {
         #[cfg(target_os = "linux")]
         popup: None,
         pending_restore: None,
+        restore_at: None,
         last_payload: None,
         jobs: jobs_tx,
         status,
@@ -1694,6 +1734,7 @@ pub fn run(model_dir: PathBuf) -> Result<()> {
                 daemon.stream_tick();
                 daemon.unload_if_idle();
                 daemon.enforce_max_capture();
+                daemon.restore_due();
             }
             Err(RecvTimeoutError::Disconnected) => break,
         }

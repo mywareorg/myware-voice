@@ -721,6 +721,68 @@ fn the_previous_clipboard_comes_back_at_the_next_press() {
 }
 
 #[test]
+fn the_previous_clipboard_comes_back_once_the_paste_has_landed() {
+    let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
+
+    // The same selection shims, plus a `wtype` that accepts the chord, so the
+    // daemon takes the delivery path that actually pastes.
+    let holder = Temp::new("clipboard-paste-shims");
+    let bin = holder.0.join("bin");
+    let clip = holder.0.join("clipboard");
+    std::fs::create_dir_all(&bin).expect("create the shim directory");
+    std::fs::write(&clip, "my secret").expect("seed the clipboard");
+    for (name, body) in [
+        ("wl-copy", "#!/bin/sh\ncat > \"$CLIP_FILE\"\n"),
+        ("wl-paste", "#!/bin/sh\ncat \"$CLIP_FILE\"\n"),
+        ("wtype", "#!/bin/sh\nexit 0\n"),
+        ("notify-send", "#!/bin/sh\nexit 0\n"),
+    ] {
+        let path = bin.join(name);
+        std::fs::write(&path, body).expect("write shim");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&path).expect("stat").permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&path, permissions).expect("chmod");
+        }
+    }
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let _fixture = Fixture::start(
+        "clipboard-paste",
+        "paste = \"wtype\"\nclipboard = \"keep\"\ntones = false\nhistory = false\n",
+        Some("hello from the test"),
+        &[
+            ("PATH", &path),
+            ("CLIP_FILE", clip.to_str().expect("utf-8")),
+            ("MYWARE_VOICE_FAKE_FOCUS", "foot:1"),
+            ("MYWARE_VOICE_FAKE_DELIVERY", "0"),
+        ],
+    );
+
+    let text = deliver_once();
+    assert_eq!(text.as_deref(), Some("hello from the test"));
+
+    // No second press: the transcript reached a window, so the selection that was
+    // there before the dictation is put back on its own.
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(&clip).unwrap_or_default() == "my secret",
+            Duration::from_secs(5)
+        ),
+        "the previous clipboard was not restored after the paste: {:?}\nlog:\n{}",
+        std::fs::read_to_string(&clip).unwrap_or_default(),
+        _fixture.log()
+    );
+    let _ = daemon::request("quit");
+}
+
+#[test]
 fn a_list_shape_reaches_delivery_and_a_terminal_still_gets_one_line() {
     let _guard = ENV.lock().unwrap_or_else(|error| error.into_inner());
 

@@ -184,10 +184,12 @@ gate yet.
 
 `clipboard` decides what the clipboard holds afterwards: `"keep"` (the default)
 puts back whatever was there before, and `"replace"` leaves the transcript. The
-restore happens at the **start of the next capture**, not straight after the
-paste — restoring immediately races the target application's read of the
-selection — and only if the clipboard still holds our text, so anything you copied
-in between is left alone.
+restore happens **after the paste**, once the target application has had time to
+read the selection — replacing it in the same instant races that read — and only
+if the clipboard still holds our text, so anything you copied in between is left
+alone. A capture that never pasted (`paste = "none"`, a failed chord, a window
+that moved, an empty transcript) leaves the text on the clipboard for you to paste
+yourself; the next capture puts the old selection back instead.
 
 ### Text before it is pasted
 
